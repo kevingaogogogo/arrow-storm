@@ -40,8 +40,12 @@
       letter-spacing: 1px;
       padding: 28px;
     }
-    @media (orientation: landscape) {
+    @media (orientation: landscape) and (hover: none) {
       #landscapeBlocker { display: grid; }
+    }
+    /* PC 桌面：鼠标悬停时显示手型 */
+    @media (hover: hover) and (pointer: fine) {
+      canvas { cursor: crosshair; }
     }
   </style>
 </head>
@@ -554,8 +558,9 @@ class Player {
   update(dt, game) {
     let targetX = this.x;
     if (game.input.touching) targetX = game.input.touchX;
+    else if (game.input.hover) targetX = game.input.hoverX;
     else targetX += (game.input.right - game.input.left) * this.moveSpeed * dt;
-    this.x += (targetX - this.x) * (game.input.touching ? Math.min(1, dt * 18) : 1);
+    this.x += (targetX - this.x) * (game.input.touching || game.input.hover ? Math.min(1, dt * 14) : 1);
     this.x += this.knockX * dt;
     this.y += this.knockY * dt;
     this.knockX *= Math.pow(0.05, dt);
@@ -632,7 +637,7 @@ class Game {
     this.enemies = new Pool(Enemy);
     this.bullets = new Pool(Bullet);
     this.particles = new Pool(Particle);
-    this.input = { left: 0, right: 0, touching: false, touchX: CONFIG.W / 2 };
+    this.input = { left: 0, right: 0, touching: false, touchX: CONFIG.W / 2, hover: false, hoverX: CONFIG.W / 2 };
     this.state = "MENU";
     this.highScore = Number(localStorage.getItem("arrowStormHighScore") || "0");
     this.decor = [];
@@ -1307,14 +1312,21 @@ canvas.addEventListener("pointerdown", e => {
   canvas.setPointerCapture(e.pointerId);
 });
 canvas.addEventListener("pointermove", e => {
-  if (!game.input.touching) return;
-  game.input.touchX = canvasPoint(e).x;
+  const p = canvasPoint(e);
+  // PC 鼠标：未按下时悬停即可控制角色（跟随鼠标X）
+  if (!game.input.touching && e.pointerType === "mouse") {
+    game.input.hoverX = p.x;
+    game.input.hover = true;
+    return;
+  }
+  game.input.touchX = p.x;
 });
 canvas.addEventListener("pointerup", e => {
   game.input.touching = false;
+  game.input.hover = false;
   try { canvas.releasePointerCapture(e.pointerId); } catch (_) {}
 });
-canvas.addEventListener("pointercancel", () => { game.input.touching = false; });
+canvas.addEventListener("pointercancel", () => { game.input.touching = false; game.input.hover = false; });
 
 let last = performance.now();
 let acc = 0;
