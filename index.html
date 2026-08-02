@@ -730,8 +730,7 @@ class Game {
   spawnWave() {
     this.spawnedWave = this.wave;
     if (this.wave % 5 === 0) {
-      this.enemies.get("boss", CONFIG.W / 2, -95, this.wave);
-      this.boss = this.enemies.items[this.enemies.items.length - 1];
+      this.boss = this.enemies.get("boss", CONFIG.W / 2, -95, this.wave);
       audio.boss();
       this.flashMessage(`第 ${this.wave} 波 BOSS`);
       return;
