@@ -63,8 +63,8 @@ const CONFIG = {
   BASE_ARROW_SPEED: 720,
   BASE_ARROW_DAMAGE: 10,
   BASE_RANGE: 900,
-  WAVE_LEN: 250,
-  GATE_EVERY: 250,
+  WAVE_LEN: 300,
+  GATE_EVERY: 240,
   ROAD_TOP_W: 205,
   ROAD_BOTTOM_W: 430,
   MAX_HP: 200,
@@ -380,8 +380,8 @@ class Enemy {
     if (this.type === "archer") {
       this.shootT -= dt;
       if (this.shootT <= 0) {
-        this.shootT = Util.rand(1.35, 2.25);
-        this.shootAtPlayer(game, 160);
+        this.shootT = Util.rand(2.0, 3.0);
+        this.shootAtPlayer(game, 150);
       }
     }
     if (this.isBoss) this.updateBoss(dt, game, slow);
@@ -406,16 +406,16 @@ class Enemy {
     this.y = Math.min(this.y + 18 * slow * dt, 190);
     this.shootT -= dt;
     if (this.shootT <= 0) {
-      this.shootT = 1.15;
-      for (let i = -3; i <= 3; i++) {
-        const a = Math.PI / 2 + i * 0.19 + Math.sin(this.t) * 0.1;
+      this.shootT = 1.6;
+      for (let i = -2; i <= 2; i++) {
+        const a = Math.PI / 2 + i * 0.21 + Math.sin(this.t) * 0.1;
         game.bullets.get(this.x, this.y + 35, Math.cos(a) * 185, Math.sin(a) * 185, 8, 10);
       }
-      if (Math.random() < 0.45) {
+      if (Math.random() < 0.35) {
         const sx = Util.rand(CONFIG.W / 2 - 130, CONFIG.W / 2 + 130);
         game.enemies.get("minion", sx, this.y + 85, game.wave);
       }
-      if (Math.random() < 0.22) this.bossRush = 0.45;
+      if (Math.random() < 0.18) this.bossRush = 0.45;
     }
     if (this.bossRush > 0) {
       this.bossRush -= dt;
@@ -735,10 +735,16 @@ class Game {
       this.flashMessage(`第 ${this.wave} 波 BOSS`);
       return;
     }
-    const count = Util.randi(4, 8);
-    const types = ["minion", "minion", "archer", "tank", "flyer"];
+    // 难度曲线：初期稀疏，随波次递增（1波2个 → 后期最多6个）
+    const count = Util.randi(2, 2 + Math.min(4, Math.floor(this.wave / 2)));
+    // 敌人类型按波次解锁：1-2波只有小兵，3波+射手，4波+坦克，2波+飞行怪
+    const types = [];
+    types.push("minion");
+    if (this.wave >= 2) types.push("flyer");
+    if (this.wave >= 3) types.push("archer");
+    if (this.wave >= 4) types.push("tank", "minion");
     for (let i = 0; i < count; i++) {
-      const y = -80 - i * Util.rand(44, 74);
+      const y = -80 - i * Util.rand(58, 84);
       const roadW = Util.roadWidth(Math.max(40, y + CONFIG.H * 0.45));
       const x = CONFIG.W / 2 + Util.rand(-roadW * 0.36, roadW * 0.36);
       this.enemies.get(Util.pick(types), x, y, this.wave);
