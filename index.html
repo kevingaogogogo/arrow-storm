@@ -94,6 +94,73 @@ const CONFIG = {
 };
 
 const TAU = Math.PI * 2;
+
+// ── 主题场景系统：按 Boss 波次切换，闯关感 ──
+// 每 5 波一个场景（与 Boss 同步）：森林 → 沙漠 → 雪原 → 岩浆 → 暗域 → 循环
+const THEMES = [
+  {
+    name: "翠影森林",
+    grassFar: "#294126", grassNear: "#4d7b37",
+    roadFar: "#504a42", roadNear: "#8b765c", roadEdge: "#b9aa89",
+    bg: "#101812", leaf: "rgba(205,151,61,0.38)",
+    decor: ["tree", "tree", "rock", "fence"],
+    light: ["#ffe9c9", "#c9b8ff"],
+    particle: ["#d99a48", "#f7c948"]
+  },
+  {
+    name: "黄沙戈壁",
+    grassFar: "#8a7a3a", grassNear: "#c9b45e",
+    roadFar: "#6b5a35", roadNear: "#a8905c", roadEdge: "#d8c68e",
+    bg: "#1a170e", leaf: "rgba(214,180,94,0.4)",
+    decor: ["rock", "rock", "cactus", "fence"],
+    light: ["#ffe9b0", "#ffd56a"],
+    particle: ["#e0b86a", "#c9a04a"]
+  },
+  {
+    name: "霜寒雪原",
+    grassFar: "#3a4a5c", grassNear: "#7a93ab",
+    roadFar: "#5a6a7a", roadNear: "#9ab0c4", roadEdge: "#d5e5f5",
+    bg: "#0e141c", leaf: "rgba(220,235,255,0.5)",
+    decor: ["pine", "pine", "rock", "snowrock"],
+    light: ["#e8f4ff", "#b8d8ff"],
+    particle: ["#cfe4ff", "#9fc8ff"]
+  },
+  {
+    name: "熔岩深渊",
+    grassFar: "#3a1a14", grassNear: "#6b2a1a",
+    roadFar: "#4a2418", roadNear: "#8a4a30", roadEdge: "#d88a50",
+    bg: "#180a08", leaf: "rgba(255,140,60,0.4)",
+    decor: ["magrock", "magrock", "fence", "cactus"],
+    light: ["#ffb060", "#ff7b3d"],
+    particle: ["#ff8a4a", "#e54d3c"]
+  },
+  {
+    name: "幽暗秘境",
+    grassFar: "#1a1626", grassNear: "#3a3350",
+    roadFar: "#2a2638", roadNear: "#5a5470", roadEdge: "#9088b0",
+    bg: "#0a0812", leaf: "rgba(190,140,255,0.4)",
+    decor: ["shadetree", "shadetree", "rock", "crystal"],
+    light: ["#c9a8ff", "#8a6aff"],
+    particle: ["#c9a8ff", "#a865ff"]
+  }
+];
+let themeIndex = 0;
+let themeTrans = 0; // 0=无过渡, 1=切换中
+function getTheme() { return THEMES[themeIndex]; }
+function themeForWave(wave) { return Math.floor((wave - 1) / 5) % THEMES.length; }
+// 场景切换（新波次到达时调用）
+function checkThemeSwitch(game) {
+  const want = themeForWave(game.wave);
+  if (want !== themeIndex && !game.chest) {
+    themeIndex = want;
+    themeTrans = 1;
+    game.flashMessage(`进入「${THEMES[want].name}」`);
+    audio.upgrade();
+    // 重建场景装饰
+    game.decor.length = 0;
+    for (let i = 0; i < 38; i++) game.decor.push(game.makeDecor(Util.rand(0, CONFIG.H), Util.pick(THEMES[want].decor)));
+  }
+}
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
 
@@ -447,13 +514,22 @@ class Enemy {
     this.drift = Util.rand(-1, 1);
     this.isBoss = type === "boss";
     this.hitFlash = 0;
+    // 抗性系统（流派反制）：装甲=物理减伤（克制纯伤害流），灵体=元素免疫（克制元素流）
+    // 随波次出现：3波后装甲怪，5波后灵体怪
+    this.armored = false;
+    this.ethereal = false;
+    if (!this.isBoss && wave >= 3 && Math.random() < 0.16) this.armored = true;
+    if (!this.isBoss && wave >= 5 && Math.random() < 0.12) this.ethereal = true;
+    // 首次遇到抗性怪：教育提示（防玩家困惑）
+    if (this.armored && !game._armoredHint) { game._armoredHint = true; setTimeout(() => game.flashMessage("装甲怪：物理减伤 50%，元素箭克制"), 1200); }
+    if (this.ethereal && !game._etherealHint) { game._etherealHint = true; setTimeout(() => game.flashMessage("灵体怪：免疫元素，物理箭克制"), 1200); }
     // 精英怪：非 Boss 波 18% 概率，金色边框 + 词缀 + 5倍金币
     this.isElite = !this.isBoss && Math.random() < 0.18 && wave >= 2;
     this.eliteAffix = this.isElite ? Util.pick(["swift", "huge", "armored", "splitter"]) : null;
-    // 难度曲线：敌人 HP 随波次持续增长（每波 +5%），章节额外加成
+    // 难度曲线：敌人 HP 随波次持续增长（每波 +8%），章节额外加成
     const chapBonus = 1 + Math.floor((SaveSystem.data.bestWave || 0) / 10) * 0.15;
-    const waveBonus = 1 + (wave - 1) * 0.05;
-    let hp = { minion: 20, archer: 30, tank: 80, flyer: 25, boss: 600 + wave * 250 }[type] * chapBonus * waveBonus;
+    const waveBonus = 1 + (wave - 1) * 0.08;
+    let hp = { minion: 26, archer: 38, tank: 95, flyer: 30, boss: 700 + wave * 280 }[type] * chapBonus * waveBonus;
     // 精英词缀加成
     if (this.isElite) {
       hp *= this.eliteAffix === "huge" ? 3.2 : this.eliteAffix === "armored" ? 2.4 : 1.7;
@@ -475,6 +551,14 @@ class Enemy {
     }
   }
   takeDamage(amount, crit, game, fire, ice) {
+    // 抗性结算：装甲=物理减伤50%（元素伤害全额），灵体=元素免疫（物理全额）
+    if (this.armored && !fire && !ice) amount *= 0.5;
+    if (this.ethereal && (fire || ice)) amount = 0;
+    if (amount <= 0) {
+      // 免疫提示
+      if (Math.random() < 0.4) game.particles.get(this.x, this.y - this.r - 10, Util.rand(-10, 10), -40, 0.5, this.ethereal ? "#9fe8ff" : "#cfd4dc", 1, "免疫", false);
+      return;
+    }
     this.hp -= amount;
     this.hitFlash = 0.08; // 受击白闪
     if (fire) this.fireT = 3;
@@ -533,10 +617,27 @@ class Enemy {
     }
     if (this.iceT > 0) this.iceT -= dt;
     const slow = this.iceT > 0 ? 0.5 : 1;
-    if (this.type === "tank") this.y += this.baseSpeed * slow * dt;
-    if (this.type === "flyer") {
+    // 逼近压力：所有敌人随波次缓慢下压（随飞行滚动），波次越高压得越快
+    // 基础下压速度：随波次递增（5波后开始明显，防站桩）
+    const press = Math.min(46, Math.max(0, (game.wave - 3) * 5)) * slow;
+    // 冲向玩家（minion/精英 swift）：进入 320px 后加速冲脸
+    if ((this.type === "minion" || (this.isElite && this.eliteAffix === "swift")) && !this.isBoss) {
+      const dx = game.player.x - this.x;
+      const dy = game.player.y - this.y;
+      const d = Math.hypot(dx, dy);
+      if (d < 340 && this.y < game.player.y + 60) {
+        const sp = this.isElite ? 190 : 120;
+        this.x += dx / d * sp * slow * dt;
+        this.y += dy / d * sp * slow * dt;
+      }
+    }
+    if (this.type === "tank") this.y += (this.baseSpeed + press * 0.5) * slow * dt;
+    else if (this.type === "flyer") {
       this.x += Math.sin(this.t * 2.4 + this.drift) * 55 * dt;
-      this.y += Math.cos(this.t * 1.8) * 12 * dt;
+      this.y += (Math.cos(this.t * 1.8) * 12 + press * 0.7) * slow * dt;
+    } else if (!this.isBoss && this.type !== "minion") {
+      // archer 等也缓慢下压逼近
+      this.y += press * slow * dt;
     }
     if (this.type === "archer") {
       this.shootT -= dt;
@@ -623,6 +724,36 @@ class Enemy {
     else if (this.type === "archer") drawArcher(g);
     else if (this.type === "flyer") drawFlyer(g, this.t);
     else drawMinion(g);
+    // 抗性标识：装甲=银框+盾标，灵体=蓝框+灵标
+    if (this.armored) {
+      g.strokeStyle = "#c9d4e0";
+      g.lineWidth = 3;
+      g.setLineDash([7, 5]);
+      g.beginPath();
+      g.arc(0, 0, this.r * 1.1, 0, TAU);
+      g.stroke();
+      g.setLineDash([]);
+      g.fillStyle = "#c9d4e0";
+      g.font = "bold 14px Microsoft YaHei, sans-serif";
+      g.textAlign = "center";
+      g.fillText("甲", 0, -this.r * 1.1 - 6);
+    } else if (this.ethereal) {
+      g.globalAlpha = 0.35;
+      g.fillStyle = "#9fe8ff";
+      g.beginPath();
+      g.arc(0, 0, this.r * 0.9, 0, TAU);
+      g.fill();
+      g.globalAlpha = 1;
+      g.strokeStyle = "#9fe8ff";
+      g.lineWidth = 3;
+      g.beginPath();
+      g.arc(0, 0, this.r * 1.1, 0, TAU);
+      g.stroke();
+      g.fillStyle = "#9fe8ff";
+      g.font = "bold 14px Microsoft YaHei, sans-serif";
+      g.textAlign = "center";
+      g.fillText("灵", 0, -this.r * 1.1 - 6);
+    }
     // 精英怪：金色描边 + 词缀标记
     if (this.isElite) {
       g.strokeStyle = "#f7c948";
@@ -674,22 +805,31 @@ class Sword {
   }
   update(dt, game) {
     const n = Math.max(1, game.player.swords.length);
-    // 御剑：平时环绕玩家，锁定目标时飞出斩击
+    // 御剑：平时环绕玩家，锁定目标后飞出斩击，命中才结算伤害
     if (this.target) {
       const dx = this.target.x - this.x;
       const dy = this.target.y - this.y;
       const d = Math.hypot(dx, dy);
-      if (d < 14 || !this.target.active || this.target.dead) {
+      if (!this.target.active || this.target.dead) {
         this.target = null;
-      } else {
-        const sp = 620;
-        this.x += dx / d * sp * dt;
-        this.y += dy / d * sp * dt;
-        this.angle += 12 * dt; // 飞行旋转
-        // 斩击拖尾
-        if (Math.random() < 0.6) game.particles.get(this.x, this.y, Util.rand(-10, 10), Util.rand(-10, 10), 0.22, "#d9f7ff", Util.rand(2, 4));
         return;
       }
+      if (d < 16) {
+        // 飞到目标：命中结算
+        const dmg = 15 * (game.player.summonBoost || 1);
+        this.target.takeDamage(game.player.spirit ? dmg * 2 : dmg, false, game, false, false);
+        this.target = null;
+        this.slashT = 0.12;
+        audio.sword();
+        for (let i = 0; i < 10; i++) game.particles.get(this.x, this.y, Util.rand(-50, 50), Util.rand(-70, 20), 0.4, "#d9f7ff", Util.rand(2, 5));
+        return;
+      }
+      const sp = 640;
+      this.x += dx / d * sp * dt;
+      this.y += dy / d * sp * dt;
+      this.angle += 12 * dt; // 飞行旋转
+      if (Math.random() < 0.6) game.particles.get(this.x, this.y, Util.rand(-10, 10), Util.rand(-10, 10), 0.22, "#d9f7ff", Util.rand(2, 4));
+      return;
     }
     this.angle += 3.2 * dt;
     const orbit = 42;
@@ -697,23 +837,23 @@ class Sword {
     this.y = game.player.y + Math.sin(this.angle + this.index * TAU / n) * orbit * 0.45;
     this.cooldown -= dt;
     if (this.cooldown <= 0) {
-      // 索敌范围：基础 400px，剑灵 +50% → 600px
-      const detect = 400 * (game.player.spirit ? 1.5 : 1);
+      // 索敌：以玩家为中心的全屏索敌（御剑应该主动找怪打）
+      const px = game.player.x, py = game.player.y;
+      const detect = 560 * (game.player.spirit ? 1.5 : 1);
       let best = null;
       let bestD = 999999;
       for (const e of game.enemies.active()) {
         if (e.dead) continue;
-        const d = Util.dist2(this, e);
-        if (d < bestD && d < detect * detect) { best = e; bestD = d; }
+        const d = Math.hypot(e.x - px, e.y - py);
+        // 优先索敌玩家上方的敌人（屏幕内）
+        if (d < bestD && d < detect && e.y > py - 560) { best = e; bestD = d; }
       }
       if (best) {
-        const dmg = 15 * (game.player.summonBoost || 1);
-        best.takeDamage(game.player.spirit ? dmg * 2 : dmg, false, game, false, false);
-        this.target = best; // 直接引用敌人对象，死亡/失活时自动解除锁定
-        this.slashT = 0.12;
-        audio.sword();
+        this.target = best;
+        this.cooldown = 0.9;
+      } else {
+        this.cooldown = 0.35;
       }
-      this.cooldown = 0.8;
     }
     if (this.slashT > 0) this.slashT -= dt;
   }
@@ -915,7 +1055,7 @@ const RARITY = {
 // icon 用简单字符图标（Canvas 绘制）
 const UPGRADES = [
   // ── 弹道系 ──
-  { id: "damage", name: "强弓", icon: "弓", rarity: "common", faction: "shot", desc: "弓箭伤害 +15%", max: Infinity, has: g => g.player.damage >= 999, apply: g => { g.player.damage = Math.min(999, g.player.damage * 1.15); } },
+  { id: "damage", name: "强弓", icon: "弓", rarity: "common", faction: "shot", desc: "弓箭伤害 +15%", max: 6, has: g => g.player.damagePick >= 6, apply: g => { g.player.damagePick = (g.player.damagePick || 0) + 1; g.player.damage = Math.min(999, g.player.damage * 1.15); } },
   { id: "rate", name: "疾射", icon: "速", rarity: "rare", faction: "shot", desc: "射击频率 +12%", max: 6, has: g => g.player.fireRate >= 6, apply: g => { g.player.fireRate = Math.min(6, g.player.fireRate * 1.12); } },
   { id: "multi", name: "多重箭", icon: "箭", rarity: "epic", faction: "shot", desc: "箭矢数量 +1", max: 5, has: g => g.player.arrowCount >= 5, apply: g => { g.player.arrowCount = Math.min(5, g.player.arrowCount + 1); } },
   { id: "pierce", name: "穿透", icon: "穿", rarity: "epic", faction: "shot", desc: "箭矢穿透 +1", max: 3, has: g => g.player.pierce >= 3, apply: g => { g.player.pierce = Math.min(3, g.player.pierce + 1); } },
@@ -949,33 +1089,42 @@ const FACTION_AWAKEN = {
   surv: { name: "不灭之体", desc: "回复 50% 生命，上限 +40", apply: g => { g.player.maxHp = Math.min(240, g.player.maxHp + 40); g.player.hp = Math.min(g.player.maxHp, g.player.hp + g.player.maxHp * 0.5); } }
 };
 
-// 三选一：按稀有度权重抽取 3 个不重复升级
+// 三选一：按稀有度权重抽取 3 个不重复升级，且保证流派多样性
 function rollChoices() {
   const avail = UPGRADES.filter(u => !u.has(game));
   const picks = [];
   const usedIds = new Set();
-  const attempt = () => {
-    // 先按权重抽稀有度，再从该稀有度（及更高稀有度兜底）的可用池抽
-    const pool = avail.filter(u => !usedIds.has(u.id));
+  const usedFactions = new Set();
+  const attempt = (avoidFaction) => {
+    const pool = avail.filter(u => !usedIds.has(u.id) && (!avoidFaction || u.faction !== avoidFaction));
     if (pool.length === 0) return null;
+    // 流派热度惩罚：该流派已选次数越多，权重越低（鼓励均衡发展）
     let total = 0;
-    for (const u of pool) total += RARITY[u.rarity].weight;
-    let roll = Math.random() * total;
+    const weights = [];
     for (const u of pool) {
-      roll -= RARITY[u.rarity].weight;
-      if (roll <= 0) return u;
+      const picked = game.factionCount[u.faction] || 0;
+      const w = RARITY[u.rarity].weight / (1 + picked * 0.6);
+      weights.push(w);
+      total += w;
+    }
+    let roll = Math.random() * total;
+    for (let i = 0; i < pool.length; i++) {
+      roll -= weights[i];
+      if (roll <= 0) return pool[i];
     }
     return pool[pool.length - 1];
   };
+  // 前两张：允许同流派；第三张：强制不同流派（保证构筑多样）
+  const a = attempt(null);
+  if (a) { picks.push(a); usedIds.add(a.id); usedFactions.add(a.faction); }
+  const b = attempt(null);
+  if (b) { picks.push(b); usedIds.add(b.id); usedFactions.add(b.faction); }
+  const avoid = picks.length === 2 && picks[0].faction === picks[1].faction ? picks[0].faction : null;
+  const c = attempt(avoid);
+  if (c) picks.push(c);
+  // 兜底
   while (picks.length < 3) {
-    const u = attempt();
-    if (!u) break;
-    picks.push(u);
-    usedIds.add(u.id);
-  }
-  // 不够 3 个时用回血兜底
-  while (picks.length < 3) {
-    const fallback = UPGRADES.find(u => u.id === "hp" && !usedIds.has(u.id)) || UPGRADES.find(u => u.id === "damage");
+    const fallback = avail.find(u => !usedIds.has(u.id) && u.id === "hp") || UPGRADES.find(u => u.id === "hp") || UPGRADES[0];
     picks.push(fallback);
     usedIds.add(fallback.id);
   }
@@ -1101,9 +1250,11 @@ class Game {
     this.slowMo = 0;
     this.hpGhost = 100;
     this.bossIntro = 0;
+    this._armoredHint = false;
+    this._etherealHint = false;
     this.decor.length = 0;
     this.leaves.length = 0;
-    for (let i = 0; i < 38; i++) this.decor.push(this.makeDecor(Util.rand(0, CONFIG.H), Math.random() < 0.58 ? "tree" : Math.random() < 0.78 ? "rock" : "fence"));
+    for (let i = 0; i < 38; i++) this.decor.push(this.makeDecor(Util.rand(0, CONFIG.H), Util.pick(getTheme().decor)));
     for (let i = 0; i < 22; i++) this.leaves.push({ x: Util.rand(0, CONFIG.W), y: Util.rand(0, CONFIG.H), s: Util.rand(0.4, 1.3), a: Util.rand(0, TAU) });
   }
   start() {
@@ -1112,6 +1263,8 @@ class Game {
     this.player.reset();
     applyMetaProgression(this.player); // 局外成长 → 初始属性
     this.runGold = 0; // 本局获得金币（死亡结算入账）
+    themeIndex = 0; // 每局从森林开始
+    themeTrans = 0;
     this.arrows.items.length = 0;
     this.enemies.items.length = 0;
     this.bullets.items.length = 0;
@@ -1152,11 +1305,13 @@ class Game {
       if (this.chooseT > 0) this.chooseT -= dt;
       if (this.awakenT > 0) this.awakenT -= dt;
       if (this.bossIntro > 0) this.bossIntro -= dt;
+      if (themeTrans > 0) themeTrans -= dt * 0.8;
       return;
     }
     this.flySpeed = this.getFlySpeed();
     this.distance += this.flySpeed * dt / 3;
     this.wave = Math.floor(this.distance / CONFIG.WAVE_LEN) + 1;
+    checkThemeSwitch(this); // 场景切换检测
     if (this.wave > this.spawnedWave && !this.boss) this.spawnWave();
     if (this.distance >= this.nextGateM && !this.gate && !this.choices) this.spawnGate();
     this.updateBackdrop(dt);
@@ -1174,6 +1329,7 @@ class Game {
       if (this.ring.life <= 0) this.ring = null;
     }
     if (this.bossIntro > 0) this.bossIntro -= dt;
+    if (themeTrans > 0) themeTrans -= dt * 0.8;
     if (this.shake > 0) this.shake = Math.max(0, this.shake - dt * 26);
     if (this.messageT > 0) this.messageT -= dt;
   }
@@ -1181,7 +1337,7 @@ class Game {
     const scroll = this.getFlySpeed() * dt;
     for (const d of this.decor) {
       d.y += scroll * d.layer;
-      if (d.y > CONFIG.H + 70) Object.assign(d, this.makeDecor(Util.rand(-130, -30), Math.random() < 0.56 ? "tree" : Math.random() < 0.76 ? "rock" : "fence"));
+      if (d.y > CONFIG.H + 70) Object.assign(d, this.makeDecor(Util.rand(-130, -30), Util.pick(getTheme().decor)));
     }
     for (const l of this.leaves) {
       l.y += scroll * 0.35 + l.s * 12 * dt;
@@ -1520,9 +1676,10 @@ const DemoAI = {
 };
 
 function drawWorld(g, state) {
+  const th = getTheme();
   const grad = g.createLinearGradient(0, 0, 0, CONFIG.H);
-  grad.addColorStop(0, CONFIG.COLORS.grassFar);
-  grad.addColorStop(1, CONFIG.COLORS.grassNear);
+  grad.addColorStop(0, th.grassFar);
+  grad.addColorStop(1, th.grassNear);
   g.fillStyle = grad;
   g.fillRect(0, 0, CONFIG.W, CONFIG.H);
   g.save();
@@ -1536,7 +1693,7 @@ function drawWorld(g, state) {
     g.stroke();
   }
   g.restore();
-  g.fillStyle = CONFIG.COLORS.roadFar;
+  g.fillStyle = th.roadFar;
   g.beginPath();
   g.moveTo(CONFIG.W / 2 - CONFIG.ROAD_TOP_W / 2, 0);
   g.lineTo(CONFIG.W / 2 + CONFIG.ROAD_TOP_W / 2, 0);
@@ -1545,8 +1702,8 @@ function drawWorld(g, state) {
   g.closePath();
   g.fill();
   const roadGrad = g.createLinearGradient(0, 0, 0, CONFIG.H);
-  roadGrad.addColorStop(0, CONFIG.COLORS.roadFar);
-  roadGrad.addColorStop(1, CONFIG.COLORS.roadNear);
+  roadGrad.addColorStop(0, th.roadFar);
+  roadGrad.addColorStop(1, th.roadNear);
   g.fillStyle = roadGrad;
   g.beginPath();
   g.moveTo(CONFIG.W / 2 - CONFIG.ROAD_TOP_W / 2 + 12, 0);
@@ -1555,7 +1712,7 @@ function drawWorld(g, state) {
   g.lineTo(CONFIG.W / 2 - CONFIG.ROAD_BOTTOM_W / 2 + 20, CONFIG.H);
   g.closePath();
   g.fill();
-  g.strokeStyle = CONFIG.COLORS.roadEdge;
+  g.strokeStyle = th.roadEdge;
   g.lineWidth = 5;
   g.beginPath();
   g.moveTo(CONFIG.W / 2 - CONFIG.ROAD_TOP_W / 2, 0);
@@ -1563,25 +1720,38 @@ function drawWorld(g, state) {
   g.moveTo(CONFIG.W / 2 + CONFIG.ROAD_TOP_W / 2, 0);
   g.lineTo(CONFIG.W / 2 + CONFIG.ROAD_BOTTOM_W / 2, CONFIG.H);
   g.stroke();
-  // 道路动态光斑：随飞行流动的光影
+  // 道路动态光斑：随飞行流动的光影（主题配色）
   g.save();
   g.globalAlpha = 0.08;
   for (let i = 0; i < 6; i++) {
     const ly = ((i * 170 + state.distance * 3.2) % (CONFIG.H + 200)) - 100;
     const lw = Util.roadWidth(ly) * 0.55;
     const lx = CONFIG.W / 2 + Math.sin(i * 2.4 + state.distance * 0.004) * 40;
-    g.fillStyle = i % 2 ? "#ffe9c9" : "#c9b8ff";
+    g.fillStyle = th.light[i % 2];
     g.beginPath();
     g.ellipse(lx, ly, lw * 0.32, 16 + ly / CONFIG.H * 14, 0, 0, TAU);
     g.fill();
   }
   g.restore();
   for (const d of [...state.decor].sort((a, b) => a.y - b.y)) drawDecor(g, d);
-  drawLeaves(g, state.leaves);
+  drawLeaves(g, state.leaves, th.leaf);
+  // 场景过渡横幅（淡入淡出）
+  if (themeTrans > 0) {
+    const a = Math.min(1, themeTrans * 2);
+    g.save();
+    g.globalAlpha = a;
+    g.fillStyle = "rgba(0,0,0,0.5)";
+    g.fillRect(0, CONFIG.H * 0.42 - 50, CONFIG.W, 100);
+    g.fillStyle = "#f5ecd9";
+    g.font = "bold 26px Microsoft YaHei, sans-serif";
+    g.textAlign = "center";
+    g.fillText(`— ${th.name} —`, CONFIG.W / 2, CONFIG.H * 0.42 + 6);
+    g.restore();
+  }
 }
 
 function drawDecor(g, d) {
-  const s = Util.worldScale(d.y) * (d.type === "tree" ? 1 : 0.75);
+  const s = Util.worldScale(d.y) * (d.type === "tree" || d.type === "pine" || d.type === "shadetree" ? 1 : 0.75);
   g.save();
   g.translate(d.x, d.y);
   g.rotate(d.rot);
@@ -1601,6 +1771,99 @@ function drawDecor(g, d) {
     g.moveTo(-4 * s, -34 * s);
     g.lineTo(-18 * s, -2 * s);
     g.lineTo(3 * s, -8 * s);
+    g.closePath();
+    g.fill();
+  } else if (d.type === "pine") {
+    // 雪原松树
+    g.fillStyle = "#4a3a28";
+    g.fillRect(-4 * s, -2 * s, 8 * s, 24 * s);
+    for (let k = 0; k < 3; k++) {
+      const y = -10 - k * 14;
+      g.fillStyle = k === 2 ? "#2e5c4a" : "#3a6e58";
+      g.beginPath();
+      g.moveTo(0, (y - 18) * s);
+      g.lineTo(-22 * s, y * s + 8 * s);
+      g.lineTo(22 * s, y * s + 8 * s);
+      g.closePath();
+      g.fill();
+    }
+    g.fillStyle = "rgba(255,255,255,0.35)";
+    g.beginPath();
+    g.moveTo(-8 * s, -30 * s);
+    g.lineTo(-4 * s, -40 * s);
+    g.lineTo(0, -34 * s);
+    g.closePath();
+    g.fill();
+  } else if (d.type === "shadetree") {
+    // 暗域树：深紫+发光
+    g.fillStyle = "#2a1a3a";
+    g.fillRect(-5 * s, -2 * s, 10 * s, 26 * s);
+    g.fillStyle = d.tone > 0.5 ? "#4a2a6a" : "#3a2058";
+    g.beginPath();
+    g.arc(0, -20 * s, 22 * s, 0, TAU);
+    g.fill();
+    g.fillStyle = "rgba(190,140,255,0.25)";
+    g.beginPath();
+    g.arc(-6 * s, -24 * s, 8 * s, 0, TAU);
+    g.fill();
+  } else if (d.type === "cactus") {
+    // 沙漠仙人掌
+    g.fillStyle = "#3a6a3a";
+    g.fillRect(-4 * s, -4 * s, 8 * s, 30 * s);
+    g.fillRect(-14 * s, -2 * s, 8 * s, 14 * s);
+    g.fillRect(6 * s, 4 * s, 8 * s, 12 * s);
+    g.fillStyle = "rgba(255,255,255,0.15)";
+    g.fillRect(-3 * s, -4 * s, 3 * s, 14 * s);
+  } else if (d.type === "magrock") {
+    // 岩浆岩石：暗红+裂纹发光
+    g.fillStyle = "#3a1a14";
+    g.beginPath();
+    g.moveTo(-20 * s, 5 * s);
+    g.lineTo(-8 * s, -16 * s);
+    g.lineTo(15 * s, -11 * s);
+    g.lineTo(24 * s, 7 * s);
+    g.lineTo(7 * s, 17 * s);
+    g.closePath();
+    g.fill();
+    g.strokeStyle = "rgba(255,120,60,0.6)";
+    g.lineWidth = 2.5 * s;
+    g.beginPath();
+    g.moveTo(-6 * s, -8 * s);
+    g.lineTo(8 * s, -2 * s);
+    g.stroke();
+  } else if (d.type === "snowrock") {
+    g.fillStyle = "#7a93ab";
+    g.beginPath();
+    g.moveTo(-20 * s, 5 * s);
+    g.lineTo(-8 * s, -16 * s);
+    g.lineTo(15 * s, -11 * s);
+    g.lineTo(24 * s, 7 * s);
+    g.lineTo(7 * s, 17 * s);
+    g.closePath();
+    g.fill();
+    g.fillStyle = "rgba(255,255,255,0.5)";
+    g.beginPath();
+    g.moveTo(-8 * s, -16 * s);
+    g.lineTo(0, -6 * s);
+    g.lineTo(-12 * s, 0);
+    g.closePath();
+    g.fill();
+  } else if (d.type === "crystal") {
+    // 暗域水晶
+    g.fillStyle = "#8a6aff";
+    g.beginPath();
+    g.moveTo(0, -26 * s);
+    g.lineTo(9 * s, -4 * s);
+    g.lineTo(4 * s, 10 * s);
+    g.lineTo(-4 * s, 10 * s);
+    g.lineTo(-9 * s, -4 * s);
+    g.closePath();
+    g.fill();
+    g.fillStyle = "rgba(220,200,255,0.6)";
+    g.beginPath();
+    g.moveTo(0, -26 * s);
+    g.lineTo(4 * s, -8 * s);
+    g.lineTo(-2 * s, 4 * s);
     g.closePath();
     g.fill();
   } else if (d.type === "rock") {
@@ -1628,12 +1891,12 @@ function drawDecor(g, d) {
   g.restore();
 }
 
-function drawLeaves(g, leaves) {
+function drawLeaves(g, leaves, color) {
   g.save();
   for (const l of leaves) {
     g.translate(l.x, l.y);
     g.rotate(l.a);
-    g.fillStyle = "rgba(205,151,61,0.38)";
+    g.fillStyle = color || "rgba(205,151,61,0.38)";
     g.beginPath();
     g.ellipse(0, 0, 5 * l.s, 2.5 * l.s, 0, 0, TAU);
     g.fill();
@@ -2166,6 +2429,18 @@ function drawGameOver(g, state) {
   g.fillStyle = "#f1dfbf";
   g.fillText(`最高分 ${state.highScore}m`, CONFIG.W / 2, 460);
   drawButton(g, CONFIG.W / 2 - 105, 504, 210, 62, "重开");
+  // 去商店按钮（金币引导：花掉本局赚的金币）
+  g.fillStyle = "rgba(247,201,72,0.18)";
+  roundRect(g, CONFIG.W / 2 - 88, 586, 176, 44, 10); g.fill();
+  g.strokeStyle = "rgba(247,201,72,0.5)";
+  g.lineWidth = 2;
+  roundRect(g, CONFIG.W / 2 - 88, 586, 176, 44, 10); g.stroke();
+  g.fillStyle = "#f7c948";
+  g.font = "bold 17px Microsoft YaHei, sans-serif";
+  g.fillText(`去商店消费 💰${SaveSystem.data.gold}`, CONFIG.W / 2, 615);
+  g.fillStyle = "#a9977d";
+  g.font = "13px Microsoft YaHei, sans-serif";
+  g.fillText("金币用于购买永久装备与天赋", CONFIG.W / 2, 664);
   g.restore();
 }
 
@@ -2278,6 +2553,7 @@ function activateAt(x, y) {
     }
   } else if (game.state === "GAME_OVER") {
     if (x >= CONFIG.W / 2 - 105 && x <= CONFIG.W / 2 + 105 && y >= 504 && y <= 566) game.start();
+    else if (x >= CONFIG.W / 2 - 88 && x <= CONFIG.W / 2 + 88 && y >= 586 && y <= 630) game.openShop();
   }
 }
 
