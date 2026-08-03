@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-  <title>箭雨 v3.29</title>
+  <title>箭雨 v3.30</title>
   <style>
     html, body {
       margin: 0;
@@ -50,8 +50,8 @@
   </style>
 </head>
 <body>
-  <canvas id="game" width="540" height="960" aria-label="箭雨 v3.29 游戏画布"></canvas>
-  <div id="landscapeBlocker">请旋转设备为竖屏<br>箭雨 v3.29 仅支持竖屏飞行</div>
+  <canvas id="game" width="540" height="960" aria-label="箭雨 v3.30 游戏画布"></canvas>
+  <div id="landscapeBlocker">请旋转设备为竖屏<br>箭雨 v3.30 仅支持竖屏飞行</div>
 <script>
 "use strict";
 
@@ -1093,7 +1093,7 @@ class Enemy {
       const dy = game.player.y - this.y;
       const d = Math.max(1, Math.hypot(dx, dy));
       // 冲刺怪（小兵/精英swift）加速冲脸，其他缓慢逼近
-      // v3.29: 前期移速下调（小兵 120→100，swift 190→170），新手不会被瞬追
+      // v3.30: 前期移速下调（小兵 120→100，swift 190→170），新手不会被瞬追
       const chase = this.type === "minion" ? (this.isElite ? 140 : 100)
         : this.type === "tank" ? 42
         : this.type === "flyer" ? 88 : 60;
@@ -1203,7 +1203,7 @@ class Enemy {
       } else if (this.eliteAffix === "splitter") {
         // 分裂怪：死亡前加速冲脸（为分裂制造压力）
         // ⚠️ 注意：chaseSpeed 是上面 if 块的块级 let 变量，这里引用会 ReferenceError
-        // 导致 rAF 主循环中断 = 游戏"卡住"（曾修过：v3.29 前的卡死根因）
+        // 导致 rAF 主循环中断 = 游戏"卡住"（曾修过：v3.30 前的卡死根因）
         const sdx = game.player.x - this.x, sdy = game.player.y - this.y;
         const sd = Math.max(1, Math.hypot(sdx, sdy));
         const spd = 160 * slow;
@@ -1214,7 +1214,7 @@ class Enemy {
     if (this.isBoss) this.updateBoss(dt, game, slow);
     if (this.y > CONFIG.H + this.r + 80) this.active = false;
     if (!this.dead && game.player.canBeHit() && Util.circleHit(this, game.player)) {
-      // 碰撞伤害随章节成长（v3.29: 前期温和 13+ch×2，第1章15 可挨3下）
+      // 碰撞伤害随章节成长（v3.30: 前期温和 13+ch×2，第1章15 可挨3下）
       const hitDmg = 13 + (game.chapter || 1) * 2;
       game.player.hurt(hitDmg, game, Math.sign(game.player.x - this.x) * 90, 50);
     }
@@ -1621,7 +1621,7 @@ class Player {
     this.y = CONFIG.PLAYER_Y;
     this.r = CONFIG.PLAYER_R;
     this.hp = 50;
-    this.maxHp = 50; // v3.29: 40→50，前期容错（第1章碰撞15可挨3下）
+    this.maxHp = 50; // v3.30: 40→50，前期容错（第1章碰撞15可挨3下）
     this.moveSpeed = CONFIG.BASE_MOVE_SPEED;
     this.damage = CONFIG.BASE_ARROW_DAMAGE;
     this.fireRate = CONFIG.BASE_FIRE_RATE;
@@ -4420,7 +4420,7 @@ function drawMenu(g, state) {
   g.shadowBlur = 6 + 6 * pulse;
   g.fillStyle = "#d4c6af";
   g.font = "20px Microsoft YaHei, sans-serif";
-  g.fillText("v3.29 · 房间闯关 · 排行榜 · 每日挑战", CONFIG.W / 2, 292);
+  g.fillText("v3.30 · 房间闯关 · 排行榜 · 每日挑战", CONFIG.W / 2, 292);
   g.fillStyle = "#ffe59a";
   g.font = "bold 18px Microsoft YaHei, sans-serif";
   g.fillText(Leaderboard.champion || "暂无王者", CONFIG.W / 2, 326);
@@ -4580,13 +4580,16 @@ function drawGameOver(g, state) {
   g.fillText(`局内剩余 ${state.runGold || 0} · 章节奖励 ${state.settlementBonus || 0}`, CONFIG.W / 2, 460);
   drawButton(g, CONFIG.W / 2 - 105, 504, 210, 62, "重开");
   if (state.heroLeveledMsg) {
+    // 升级提示放按钮下方，留足间距（之前 y560 压在按钮 504-566 底部）
+    g.fillStyle = "rgba(0,0,0,0.35)";
+    roundRect(g, CONFIG.W / 2 - 140, 588, 280, 34, 8); g.fill();
     g.fillStyle = "#ffd56a";
     g.font = "bold 16px Microsoft YaHei, sans-serif";
-    g.fillText(state.heroLeveledMsg, CONFIG.W / 2, 560);
+    g.fillText(state.heroLeveledMsg, CONFIG.W / 2, 610);
   }
   g.fillStyle = "#a9977d";
   g.font = "13px Microsoft YaHei, sans-serif";
-  g.fillText(`英雄 Lv.${SaveSystem.data.heroLevel}（经验 ${SaveSystem.data.heroExp}/${heroExpNeed(SaveSystem.data.heroLevel)}）`, CONFIG.W / 2, 596);
+  g.fillText(`英雄 Lv.${SaveSystem.data.heroLevel}（经验 ${SaveSystem.data.heroExp}/${heroExpNeed(SaveSystem.data.heroLevel)}）`, CONFIG.W / 2, 656);
   g.restore();
 }
 
