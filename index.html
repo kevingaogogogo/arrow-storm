@@ -988,6 +988,10 @@ class Enemy {
         game.enemies.get("minion", this.x + (i ? 50 : -50), this.y + 20, game.wave);
       }
     }
+    // 图鉴解锁：击杀记录怪物/Boss/精英词缀
+    if (this.isBoss) codexUnlock("monsters", "boss_" + this.bossKind);
+    else codexUnlock("monsters", this.type);
+    if (this.isElite && this.eliteAffix) codexUnlock("monsters", "elite_" + this.eliteAffix);
   }
   update(dt, game) {
     this.t += dt;
@@ -1850,7 +1854,9 @@ const DEFAULTS = {
   heroLevel: 1,
   heroExp: 0,
   heroPoints: 0,
-  heroTree: { dmg: 0, rate: 0, hp: 0, crit: 0, gold: 0, luck: 0 }  // 各天赋已加点数
+  heroTree: { dmg: 0, rate: 0, hp: 0, crit: 0, gold: 0, luck: 0 },  // 各天赋已加点数
+  // 图鉴（收集进度）：击杀/获得自动解锁
+  codex: { monsters: [], skills: [], skins: [] }
 };
 
 // 英雄天赋树定义（局外成长，每级 1 点，无限成长钩子）
@@ -1887,6 +1893,35 @@ const WEAPON_SKINS = [
   { id: 3, name: "雷神弓", icon: "⚡", price: 200, color: "#f7c948", desc: "暴击率 +12%，箭速 +15%", bonus: { crit: 0.12, arrowSpeed: 1.15 } }
 ];
 function getWeaponSkin() { return WEAPON_SKINS[SaveSystem.data.weaponSkin] || WEAPON_SKINS[0]; }
+
+// ── 图鉴系统（收集进度）──
+const CODEX_MONSTERS = [
+  { id: "minion", name: "哥布林", icon: "👺", desc: "最普通的杂兵，喜欢成群冲脸", hint: "蛇形接近，注意走位" },
+  { id: "archer", name: "骷髅弓手", icon: "💀", desc: "会预判你走位的远程射手", hint: "侧移躲箭，优先击杀" },
+  { id: "tank", name: "石巨人", icon: "🗿", desc: "皮糙肉厚，近身会撞击", hint: "保持距离风筝" },
+  { id: "flyer", name: "蝙蝠魔", icon: "🦇", desc: "飘忽不定，左右摆动接近", hint: "等它靠近再打" },
+  { id: "boss_treant", name: "树精王", icon: "🌳", desc: "第 1 章霸主：召唤小兵 + 藤蔓地刺", hint: "躲开藤蔓预警圈" },
+  { id: "boss_scorpion", name: "沙蝎王", icon: "🦂", desc: "第 2 章霸主：预判地刺 + 尾刺下砸", hint: "别直线走位" },
+  { id: "boss_frost", name: "冰霜巨人", icon: "🧊", desc: "第 3 章霸主：冰域减速 + 冰柱", hint: "冰域里移动极慢，快离开" },
+  { id: "boss_demon", name: "炎魔领主", icon: "👹", desc: "第 4 章霸主：火海封路 + 召唤", hint: "火海预警圈出现就撤" },
+  { id: "boss_shadow", name: "暗影魔王", icon: "👁", desc: "第 5 章霸主：闪现突袭 + 暗影波", hint: "它消失时要留意头顶" },
+  { id: "elite_swift", name: "精英·迅捷", icon: "⚡", desc: "速度极快的精英词缀", hint: "拉开距离打" },
+  { id: "elite_huge", name: "精英·巨硕", icon: "🪨", desc: "体型巨大，血量翻倍", hint: "别硬拼，风筝" },
+  { id: "elite_armored", name: "精英·装甲", icon: "🛡", desc: "物理减伤 50%，元素克制", hint: "用元素箭打" },
+  { id: "elite_splitter", name: "精英·分裂", icon: "🔱", desc: "死亡后分裂成 2 个小兵", hint: "注意别被围殴" }
+];
+const CODEX_SKILLS = UPGRADES.map(u => ({ id: u.id, name: u.name, icon: u.icon, rarity: u.rarity, faction: u.faction }));
+function codexUnlock(cat, id) {
+  if (!id) return;
+  const arr = SaveSystem.data.codex[cat];
+  if (!Array.isArray(arr)) return;
+  if (!arr.includes(id)) { arr.push(id); SaveSystem.save(); }
+}
+function codexProgress(cat) {
+  const total = cat === "monsters" ? CODEX_MONSTERS.length : cat === "skills" ? CODEX_SKILLS.length : WEAPON_SKINS.length;
+  const got = (SaveSystem.data.codex[cat] || []).length;
+  return { got: Math.min(got, total), total };
+}
 function applyWeaponSkin(player) {
   const skin = getWeaponSkin();
   if (skin.bonus.dmg) player.damage *= skin.bonus.dmg;
@@ -1915,7 +1950,8 @@ const SaveSystem = {
         heroLevel: parsed.heroLevel || 1,
         heroExp: parsed.heroExp || 0,
         heroPoints: parsed.heroPoints || 0,
-        heroTree: { ...DEFAULTS.heroTree, ...(parsed.heroTree || {}) }
+        heroTree: { ...DEFAULTS.heroTree, ...(parsed.heroTree || {}) },
+        codex: { monsters: Array.isArray(parsed.codex?.monsters) ? parsed.codex.monsters : [], skills: Array.isArray(parsed.codex?.skills) ? parsed.codex.skills : [], skins: Array.isArray(parsed.codex?.skins) ? parsed.codex.skins : [] }
       };
       return this.data;
     } catch (e) {
@@ -2078,6 +2114,12 @@ class Game {
     Leaderboard.load().catch(() => {});
   }
   closeLeaderboard() { this.state = "MENU"; }
+  openCodex() {
+    audio.ensure();
+    this.state = "CODEX";
+    this.codexTab = this.codexTab || "monsters";
+  }
+  closeCodex() { this.state = "MENU"; }
   openHeroTree() {
     audio.ensure();
     this.state = "HERO";
@@ -2317,6 +2359,8 @@ class Game {
         s.weaponSkin = slot;
         SaveSystem.save();
       } else return false;
+      // 图鉴解锁：武器皮肤
+      codexUnlock("skins", String(slot));
     }
     SaveSystem.save();
     this.flashMessage("购买成功！");
@@ -2399,6 +2443,8 @@ class Game {
     item.apply(this);
     if (!this.player.pickedUpgrades) this.player.pickedUpgrades = [];
     this.player.pickedUpgrades.push({ id: item.id, name: item.name, icon: item.icon, rarity: "shop", faction: "shop" });
+    // 图鉴解锁：商店技能
+    codexUnlock("skills", item.id);
     this.flashMessage(`${item.name}：购买成功`);
     audio.upgrade();
     return true;
@@ -2408,6 +2454,8 @@ class Game {
     // 记录已选技能卡（详细面板展示）
     if (!this.player.pickedUpgrades) this.player.pickedUpgrades = [];
     this.player.pickedUpgrades.push({ id: up.id, name: up.name, icon: up.icon, rarity: up.rarity, faction: up.faction });
+    // 图鉴解锁：技能卡
+    codexUnlock("skills", up.id);
     // 流派计数 + 觉醒检测（每选 3 个同系触发）
     this.factionCount[up.faction] = (this.factionCount[up.faction] || 0) + 1;
     if (this.factionCount[up.faction] % 3 === 0 && !this.factionAwakened[up.faction]) {
@@ -3809,6 +3857,94 @@ function drawHeroTree(g, state) {
   g.restore();
 }
 
+function drawCodex(g, state) {
+  g.save();
+  g.fillStyle = "rgba(7,12,8,0.9)";
+  g.fillRect(0, 0, CONFIG.W, CONFIG.H);
+  g.textAlign = "center";
+  g.fillStyle = "#fff0c4";
+  g.font = "bold 34px Microsoft YaHei, sans-serif";
+  g.fillText("图鉴", CONFIG.W / 2, 72);
+  // 页签：怪物 / 技能 / 皮肤
+  const tabs = [
+    { key: "monsters", label: "怪物" },
+    { key: "skills", label: "技能" },
+    { key: "skins", label: "皮肤" }
+  ];
+  const tabW = 130, tabH = 38, gap = 12;
+  const startX = (CONFIG.W - tabW * 3 - gap * 2) / 2;
+  tabs.forEach((tb, i) => {
+    const x = startX + i * (tabW + gap);
+    const active = state.codexTab === tb.key;
+    g.fillStyle = active ? "#a865ff" : "rgba(255,255,255,0.1)";
+    roundRect(g, x, 92, tabW, tabH, 8); g.fill();
+    g.fillStyle = active ? "#fff" : "#9aa5b4";
+    g.font = "bold 15px Microsoft YaHei, sans-serif";
+    g.fillText(tb.label, x + tabW / 2, 117);
+  });
+  // 收集进度
+  const p = codexProgress(state.codexTab);
+  g.fillStyle = "#f7c948";
+  g.font = "bold 15px Microsoft YaHei, sans-serif";
+  g.fillText(`已收集 ${p.got} / ${p.total}`, CONFIG.W / 2, 152);
+  const progP = p.total ? p.got / p.total : 0;
+  g.fillStyle = "rgba(255,255,255,0.12)";
+  roundRect(g, 120, 162, 300, 10, 5); g.fill();
+  g.fillStyle = "#f7c948";
+  roundRect(g, 120, 162, 300 * progP, 10, 5); g.fill();
+  // 卡片网格（4 列）
+  let list = [];
+  let colors = {};
+  if (state.codexTab === "monsters") list = CODEX_MONSTERS;
+  else if (state.codexTab === "skills") list = CODEX_SKILLS;
+  else list = WEAPON_SKINS.map(w => ({ id: String(w.id), name: w.name, icon: w.icon, rarity: "skin", desc: w.desc }));
+  const rarColor = { common: "#b8c4d0", rare: "#5fc6ff", epic: "#c77dff", legendary: "#f7c948", shop: "#ffd56a", skin: "#ffd56a" };
+  const rarLabel = { common: "普通", rare: "稀有", epic: "史诗", legendary: "传说", shop: "商店", skin: "皮肤" };
+  list.forEach((item, i) => {
+    const col = i % 4;
+    const row = Math.floor(i / 4);
+    const x = 70 + col * 108;
+    const y = 198 + row * 128;
+    const unlocked = (SaveSystem.data.codex[state.codexTab] || []).includes(String(item.id)) ||
+      (state.codexTab === "skins" && (SaveSystem.data.weaponSkin >= Number(item.id)));
+    const c = rarColor[item.rarity] || "#b8c4d0";
+    g.fillStyle = "rgba(0,0,0,0.4)";
+    roundRect(g, x - 42, y - 10, 96, 100, 8); g.fill();
+    g.strokeStyle = unlocked ? c : "rgba(255,255,255,0.12)";
+    g.lineWidth = 2;
+    roundRect(g, x - 42, y - 10, 96, 100, 8); g.stroke();
+    if (unlocked) {
+      g.fillStyle = c;
+      g.font = "bold 26px Microsoft YaHei, sans-serif";
+      g.fillText(item.icon, x, y + 22);
+      g.fillStyle = "#e8eef6";
+      g.font = "bold 12px Microsoft YaHei, sans-serif";
+      g.fillText(item.name, x, y + 46);
+      g.fillStyle = "#8a94a3";
+      g.font = "10px Microsoft YaHei, sans-serif";
+      g.fillText(rarLabel[item.rarity] || "", x, y + 62);
+      g.fillStyle = "#6b7686";
+      g.font = "9px Microsoft YaHei, sans-serif";
+      g.fillText(item.desc ? Array.from(item.desc).slice(0, 8).join("") + "…" : "", x, y + 78);
+    } else {
+      g.fillStyle = "#5a6472";
+      g.font = "bold 26px Microsoft YaHei, sans-serif";
+      g.fillText("?", x, y + 22);
+      g.font = "bold 12px Microsoft YaHei, sans-serif";
+      g.fillText("未解锁", x, y + 46);
+      g.font = "10px Microsoft YaHei, sans-serif";
+      g.fillText(state.codexTab === "monsters" ? "击杀解锁" : state.codexTab === "skills" ? "获得解锁" : "购买解锁", x, y + 62);
+    }
+  });
+  // 返回按钮
+  g.fillStyle = "rgba(255,255,255,0.12)";
+  roundRect(g, 210, 882, 120, 44, 10); g.fill();
+  g.fillStyle = "#e8eef6";
+  g.font = "bold 18px Microsoft YaHei, sans-serif";
+  g.fillText("返回", 270, 912);
+  g.restore();
+}
+
 function drawUI(g, state) {
   if (state.state === "PLAY") drawHud(g, state);
   if (state.messageT > 0) {
@@ -3826,6 +3962,7 @@ function drawUI(g, state) {
   if (state.statsPanel) drawStatsPanel(g, state);
   if (state.state === "MENU") drawMenu(g, state);
   if (state.state === "HERO") drawHeroTree(g, state);
+  if (state.state === "CODEX") drawCodex(g, state);
   if (state.state === "LEADERBOARD") drawLeaderboard(g, state);
   if (state.state === "GAME_OVER") drawGameOver(g, state);
 }
@@ -3997,26 +4134,35 @@ function drawMenu(g, state) {
   g.fillStyle = "#8affc1";
   g.font = "bold 17px Microsoft YaHei, sans-serif";
   g.fillText("天赋树", CONFIG.W / 2, 590);
+  // 图鉴按钮
+  g.fillStyle = "rgba(255,170,90,0.16)";
+  roundRect(g, CONFIG.W / 2 - 88, 614, 176, 42, 10); g.fill();
+  g.strokeStyle = "rgba(255,170,90,0.5)";
+  g.lineWidth = 2;
+  roundRect(g, CONFIG.W / 2 - 88, 614, 176, 42, 10); g.stroke();
+  g.fillStyle = "#ffaa5a";
+  g.font = "bold 17px Microsoft YaHei, sans-serif";
+  g.fillText(`图鉴 ${codexProgress("monsters").got + codexProgress("skills").got + codexProgress("skins").got}/${CODEX_MONSTERS.length + CODEX_SKILLS.length + WEAPON_SKINS.length}`, CONFIG.W / 2, 642);
   // 永久金币显示（局内商店可用）+ 排行榜按钮
   g.fillStyle = "#f7c948";
   g.font = "bold 14px Microsoft YaHei, sans-serif";
-  g.fillText(`永久金币 ${SaveSystem.data.gold} 💰（局内商店可用）`, CONFIG.W / 2, 624);
+  g.fillText(`永久金币 ${SaveSystem.data.gold} 💰（局内商店可用）`, CONFIG.W / 2, 676);
   g.fillStyle = "rgba(168,101,255,0.18)";
-  roundRect(g, CONFIG.W / 2 - 88, 640, 176, 42, 10); g.fill();
+  roundRect(g, CONFIG.W / 2 - 88, 692, 176, 42, 10); g.fill();
   g.strokeStyle = "rgba(168,101,255,0.5)";
   g.lineWidth = 2;
-  roundRect(g, CONFIG.W / 2 - 88, 640, 176, 42, 10); g.stroke();
+  roundRect(g, CONFIG.W / 2 - 88, 692, 176, 42, 10); g.stroke();
   g.fillStyle = "#e8eef6";
   g.font = "bold 17px Microsoft YaHei, sans-serif";
-  g.fillText("排行榜", CONFIG.W / 2, 668);
+  g.fillText("排行榜", CONFIG.W / 2, 720);
   g.fillStyle = "#f1dfbf";
   g.font = "15px Microsoft YaHei, sans-serif";
-  g.fillText(`最高进度：第 ${SaveSystem.data.chapter || 1} 章`, CONFIG.W / 2, 706);
+  g.fillText(`最高进度：第 ${SaveSystem.data.chapter || 1} 章`, CONFIG.W / 2, 756);
   const lines = ["←→ / AD / WASD 四向移动，触摸拖拽控制角色", "每章 6 房：战斗 · 商店 · 精英 · BOSS · 清房三选一", "右下角商店随时购买强化 · 英雄等级开天赋点"];
-  lines.forEach((line, i) => g.fillText(line, CONFIG.W / 2, 742 + i * 30));
+  lines.forEach((line, i) => g.fillText(line, CONFIG.W / 2, 786 + i * 28));
   g.fillStyle = "#a9977d";
   g.font = "14px Microsoft YaHei, sans-serif";
-  g.fillText(`音效：${audio.muted ? "关" : "开"}  点击左上角音符切换`, CONFIG.W / 2, 842);
+  g.fillText(`音效：${audio.muted ? "关" : "开"}  点击左上角音符切换`, CONFIG.W / 2, 878);
   g.restore();
 }
 
@@ -4282,7 +4428,19 @@ function activateAt(x, y) {
     if (x >= CONFIG.W / 2 - 105 && x <= CONFIG.W / 2 + 105 && y >= 376 && y <= 438) game.start();
     else if (x >= CONFIG.W / 2 - 88 && x <= CONFIG.W / 2 + 88 && y >= 452 && y <= 494) { game.enterDaily(); }
     else if (x >= CONFIG.W / 2 - 88 && x <= CONFIG.W / 2 + 88 && y >= 562 && y <= 604) game.openHeroTree();
-    else if (x >= CONFIG.W / 2 - 88 && x <= CONFIG.W / 2 + 88 && y >= 640 && y <= 682) game.openLeaderboard();
+    else if (x >= CONFIG.W / 2 - 88 && x <= CONFIG.W / 2 + 88 && y >= 614 && y <= 656) game.openCodex();
+    else if (x >= CONFIG.W / 2 - 88 && x <= CONFIG.W / 2 + 88 && y >= 692 && y <= 734) game.openLeaderboard();
+  } else if (game.state === "CODEX") {
+    // 返回
+    if (x >= 210 && x <= 330 && y >= 882 && y <= 926) { game.closeCodex(); return; }
+    // 页签切换
+    const tabW = 130, tabH = 38, gap = 12;
+    const startX = (CONFIG.W - tabW * 3 - gap * 2) / 2;
+    const tabs = ["monsters", "skills", "skins"];
+    tabs.forEach((key, i) => {
+      const tx = startX + i * (tabW + gap);
+      if (x >= tx && x <= tx + tabW && y >= 92 && y <= 130) game.codexTab = key;
+    });
   } else if (game.state === "HERO") {
     // 返回
     if (x >= 210 && x <= 330 && y >= 882 && y <= 926) { game.closeHeroTree(); return; }
