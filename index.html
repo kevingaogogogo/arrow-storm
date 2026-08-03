@@ -543,11 +543,11 @@ class Arrow {
         const wantAngle = Math.atan2(best.x - this.x, -(best.y - this.y));
         // 当前朝向角
         let curAngle = Math.atan2(this.vx, -this.vy);
-        // 最短角差转向（每秒 10 rad 追踪速率）
+        // 最短角差转向（追踪速率 7 rad/s，快移可甩开）
         let diff = wantAngle - curAngle;
         while (diff > Math.PI) diff -= TAU;
         while (diff < -Math.PI) diff += TAU;
-        const turn = Util.clamp(diff, -10 * dt, 10 * dt);
+        const turn = Util.clamp(diff, -7 * dt, 7 * dt);
         curAngle += turn;
         const sp = Math.hypot(this.vx, this.vy);
         this.vx = Math.sin(curAngle) * sp;
@@ -575,8 +575,8 @@ class Arrow {
         const crit = Math.random() < this.critChance;
         const dmg = this.damage * (crit ? 2 : 1);
         e.takeDamage(dmg, crit, game, this.fire, this.ice);
-        // 吸血：命中回复生命
-        if (this.lifesteal > 0) {
+        // 吸血：命中概率回血（防多箭+追踪无脑站桩）
+        if (this.lifesteal > 0 && Math.random() < 0.35) {
           game.player.hp = Math.min(game.player.maxHp, game.player.hp + this.lifesteal);
           if (Math.random() < 0.3) game.particles.get(game.player.x, game.player.y - 20, Util.rand(-10, 10), Util.rand(-40, -10), 0.4, "#ff6b81", Util.rand(2, 4));
         }
@@ -850,7 +850,9 @@ class Enemy {
     this.y += scroll;
     if (this.fireT > 0) {
       this.fireT -= dt;
-      this.takeDot(8 * (game.player.elemBoost || 1) * (game.player.burnMult || 1) * dt, game, "#e54d3c");
+      // 灼烧：精英/Boss 减半（元素流不是无脑最优）
+      const dotMul = (this.isElite || this.isBoss) ? 0.5 : 1;
+      this.takeDot(8 * (game.player.elemBoost || 1) * (game.player.burnMult || 1) * dotMul * dt, game, "#e54d3c");
     }
     if (this.iceT > 0) this.iceT -= dt;
     const slow = this.iceT > 0 ? 0.5 / (game.player.slowMult || 1) : 1;
@@ -865,30 +867,61 @@ class Enemy {
         : this.type === "tank" ? 48
         : this.type === "flyer" ? 100 : 60;
       const chaseSpeed = (this.isElite && this.eliteAffix === "swift" ? 190 : chase) * slow;
-      this.x += dx / d * chaseSpeed * dt;
-      this.y += dy / d * chaseSpeed * dt;
+      // 走位 IQ：小兵逼近时横向绕行（蛇形接近，不直线送死）
+      if (this.type === "minion" && d < 260) {
+        const weave = Math.sin(this.t * 3 + this.drift * 6) * 46;
+        const perpX = -dy / d, perpY = dx / d;
+        this.x += perpX * weave * dt + dx / d * chaseSpeed * dt;
+        this.y += perpY * weave * dt + dy / d * chaseSpeed * dt;
+      } else {
+        this.x += dx / d * chaseSpeed * dt;
+        this.y += dy / d * chaseSpeed * dt;
+      }
     } else if (!this.isBoss && this.type === "archer") {
-      // 射手：保持距离（玩家靠近则后退，远离则前进）
+      // 射手：保持距离（玩家靠近则后退，远离则前进）+ 侧移走位
       const dx = game.player.x - this.x;
       const dy = game.player.y - this.y;
       const d = Math.max(1, Math.hypot(dx, dy));
-      if (d < 240) {
-        this.x -= dx / d * 55 * slow * dt;
-        this.y -= dy / d * 55 * slow * dt;
-      } else if (d > 360) {
-        this.x += dx / d * 40 * slow * dt;
-        this.y += dy / d * 40 * slow * dt;
+      const strafe = Math.sin(this.t * 1.7 + this.drift * 5) * 60;
+      const perpX = -dy / d, perpY = dx / d;
+      if (d < 260) {
+        this.x += (-dx / d * 55 + perpX * strafe) * slow * dt;
+        this.y += (-dy / d * 55 + perpY * strafe) * slow * dt;
+      } else if (d > 340) {
+        this.x += (dx / d * 45 + perpX * strafe) * slow * dt;
+        this.y += (dy / d * 45 + perpY * strafe) * slow * dt;
+      } else {
+        // 中距离：侧移绕圈保持压制
+        this.x += perpX * strafe * slow * dt;
+        this.y += perpY * strafe * slow * dt;
       }
     }
     // 飘动感：飞行怪左右摆动
     if (this.type === "flyer") {
       this.x += Math.sin(this.t * 2.4 + this.drift) * 30 * dt;
     }
+    // 攻击欲望：所有远程怪更频繁攻击 + 预判玩家走位
     if (this.type === "archer") {
       this.shootT -= dt;
       if (this.shootT <= 0) {
-        this.shootT = Util.rand(2.0, 3.0);
-        this.shootAtPlayer(game, 150);
+        this.shootT = Util.rand(1.3, 1.9);
+        // 预判：朝玩家当前位置 + 移动方向偏移
+        const lead = game.player.x + game.player.vx * 0.3;
+        const leadY = game.player.y + game.player.vy * 0.3;
+        const ldx = lead - this.x, ldy = leadY - this.y;
+        const llen = Math.max(1, Math.hypot(ldx, ldy));
+        game.bullets.get(this.x, this.y + this.r * 0.4, ldx / llen * 170, ldy / llen * 170, 7, 10);
+      }
+    }
+    // 坦克：撞击力增强（近身会造成更大威胁）
+    if (this.type === "tank") {
+      const tdx = game.player.x - this.x;
+      const tdy = game.player.y - this.y;
+      const td = Math.max(1, Math.hypot(tdx, tdy));
+      if (td < 130) {
+        const sp = 90 * slow;
+        this.x += tdx / td * sp * dt;
+        this.y += tdy / td * sp * dt;
       }
     }
     if (this.isBoss) this.updateBoss(dt, game, slow);
@@ -1286,6 +1319,9 @@ class Player {
     }
     this.x += (targetX - this.x) * (game.input.touching || game.input.hover ? Math.min(1, dt * 14) : 1);
     this.y += (targetY - this.y) * (game.input.touching || game.input.hover ? Math.min(1, dt * 14) : 1);
+    // 记录速度（供敌人预判弹道）
+    this.vx = (this.x - (this.lastX || this.x)) / Math.max(0.001, dt);
+    this.vy = (this.y - (this.lastY || this.y)) / Math.max(0.001, dt);
     this.lastX = this.x;
     this.lastY = this.y;
     this.x += this.knockX * dt;
@@ -1459,7 +1495,7 @@ const UPGRADES = [
   // ── 弹道系 ──
   { id: "damage", name: "强弓", icon: "弓", rarity: "common", faction: "shot", desc: "弓箭伤害 +15%", max: 6, has: g => g.player.damagePick >= 6, apply: g => { g.player.damagePick = (g.player.damagePick || 0) + 1; g.player.damage = Math.min(999, g.player.damage * 1.15); } },
   { id: "rate", name: "疾射", icon: "速", rarity: "rare", faction: "shot", desc: "射击频率 +12%", max: 6, has: g => g.player.fireRate >= 6, apply: g => { g.player.fireRate = Math.min(6, g.player.fireRate * 1.12); } },
-  { id: "multi", name: "多重箭", icon: "箭", rarity: "epic", faction: "shot", desc: "箭矢数量 +1", max: 5, has: g => g.player.arrowCount >= 5, apply: g => { g.player.arrowCount = Math.min(5, g.player.arrowCount + 1); } },
+  { id: "multi", name: "多重箭", icon: "箭", rarity: "epic", faction: "shot", desc: "箭矢数量 +1（最多 3 支，多箭伤害递减）", max: 3, has: g => g.player.arrowCount >= 3, apply: g => { g.player.arrowCount = Math.min(3, g.player.arrowCount + 1); } },
   { id: "pierce", name: "穿透", icon: "穿", rarity: "epic", faction: "shot", desc: "箭矢穿透 +1", max: 3, has: g => g.player.pierce >= 3, apply: g => { g.player.pierce = Math.min(3, g.player.pierce + 1); } },
   { id: "crit", name: "会心", icon: "暴", rarity: "rare", faction: "shot", desc: "暴击率 +12%（2 倍伤害）", max: 0.6, has: g => g.player.crit >= 0.6, apply: g => { g.player.crit = Math.min(0.6, g.player.crit + 0.12); } },
   { id: "split", name: "分裂箭", icon: "裂", rarity: "legendary", faction: "shot", desc: "命中时分裂 2 支小箭（30% 伤害）", max: 1, has: g => g.player.split, apply: g => { g.player.split = true; } },
@@ -1481,7 +1517,7 @@ const UPGRADES = [
   { id: "regen", name: "再生", icon: "愈", rarity: "rare", faction: "surv", desc: "每秒回复 2 生命", max: 1, has: g => g.player.regen > 0, apply: g => { g.player.regen = (g.player.regen || 0) + 2; } },
   { id: "shield", name: "护盾", icon: "盾", rarity: "epic", faction: "surv", desc: "获得护盾，抵挡一次伤害", max: 3, has: g => g.player.shield >= 3, apply: g => { g.player.shield = (g.player.shield || 0) + 1; } },
   // ── 机制型（弓箭传说式）──
-  { id: "lifesteal", name: "吸血箭", icon: "吸", rarity: "epic", faction: "shot", desc: "命中回复 1.5 生命", max: 2, has: g => g.player.lifesteal >= 2, apply: g => { g.player.lifesteal = (g.player.lifesteal || 0) + 1.5; } },
+  { id: "lifesteal", name: "吸血箭", icon: "吸", rarity: "epic", faction: "shot", desc: "命中 35% 概率回复 1.5 生命", max: 2, has: g => g.player.lifesteal >= 2, apply: g => { g.player.lifesteal = (g.player.lifesteal || 0) + 1.5; } },
   { id: "orb", name: "环绕火球", icon: "环", rarity: "legendary", faction: "elem", desc: "火球环绕，触碰敌人灼烧", max: 1, has: g => g.player.orb > 0, apply: g => { g.player.orb = (g.player.orb || 0) + 1; } }
 ];
 
@@ -2060,7 +2096,9 @@ class Game {
     const spread = n === 1 ? 0 : 0.3;
     for (let i = 0; i < n; i++) {
       const t = n === 1 ? 0 : (i / (n - 1) - 0.5) * spread;
-      const a = this.arrows.get(this.player.x, this.player.y - 36, targetAngle + t, this.player.damage, this.player.range, this.player.pierce, this.player.crit, this.player.fire, this.player.ice);
+      // 多箭伤害递减：1/0.85/0.7（防止多重箭无脑碾压）
+      const dmgMul = n === 1 ? 1 : 1 - i * 0.15;
+      const a = this.arrows.get(this.player.x, this.player.y - 36, targetAngle + t, this.player.damage * dmgMul, this.player.range, this.player.pierce, this.player.crit, this.player.fire, this.player.ice);
       a.split = this.player.split;
       a.volt = this.player.volt;
       a.frostfire = this.player.frostfire;
