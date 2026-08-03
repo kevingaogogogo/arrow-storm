@@ -650,10 +650,11 @@ class Arrow {
           if (Math.random() < 0.3) game.particles.get(game.player.x, game.player.y - 20, Util.rand(-10, 10), Util.rand(-40, -10), 0.4, "#ff6b81", Util.rand(2, 4));
         }
         // 乘区联动 1：分裂箭 —— 命中生成 2 支小箭（30% 伤害）
+        // 平衡：小箭是纯物理散射（不继承追踪/元素/吸血/弹射），散开可能打空——
+        // 之前继承 homing 导致 3主箭×2小箭=6支追踪箭全命中，伤害爆炸且必中
         if (this.split) {
           for (const da of [-0.22, 0.22]) {
-            const sub = game.arrows.get(this.x, this.y, this.angle + da, this.damage * 0.3, this.range * 0.6, 0, this.critChance, this.fire, this.ice);
-            sub.homing = this.homing;
+            game.arrows.get(this.x, this.y, this.angle + da, this.damage * 0.3, this.range * 0.6, 0, 0, false, false);
           }
         }
         // 乘区联动 2：雷电箭 —— 弹射至最近其他敌人（50% 伤害）
@@ -1694,8 +1695,23 @@ class Player {
     }
     this.frostZoneT = Math.max(0, (this.frostZoneT || 0) - dt);
     const zoneSlow = this.frostZoneT > 0 ? 0.4 : 1;
-    this.x += (targetX - this.x) * (game.input.touching || game.input.hover ? Math.min(1, dt * 14) : 1) * zoneSlow;
-    this.y += (targetY - this.y) * (game.input.touching || game.input.hover ? Math.min(1, dt * 14) : 1) * zoneSlow;
+    // 移动：触摸/鼠标跟随受移速限制（防瞬移——甩鼠标不能瞬移，移速卡有意义）
+    // 之前 Math.min(1, dt*14) 指数插值：鼠标甩对角玩家飞过去（瞬移感）+ 移速卡失效
+    if (game.input.touching || game.input.hover) {
+      const dx = targetX - this.x, dy = targetY - this.y;
+      const dist = Math.hypot(dx, dy);
+      const step = this.moveSpeed * zoneSlow * dt;
+      if (dist > step) {
+        this.x += dx / dist * step;
+        this.y += dy / dist * step;
+      } else {
+        this.x = targetX;
+        this.y = targetY;
+      }
+    } else {
+      this.x += (targetX - this.x) * zoneSlow;
+      this.y += (targetY - this.y) * zoneSlow;
+    }
     // 记录速度（供敌人预判弹道）
     this.vx = (this.x - (this.lastX || this.x)) / Math.max(0.001, dt);
     this.vy = (this.y - (this.lastY || this.y)) / Math.max(0.001, dt);
