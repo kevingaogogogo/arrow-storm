@@ -186,7 +186,7 @@ const Leaderboard = {
     };
   },
   async request(method, id, body) {
-    const options = { method };
+    const options = { method, cache: "no-store" };
     if (body) {
       options.headers = { "Content-Type": "application/json" };
       options.body = JSON.stringify(body);
@@ -313,6 +313,17 @@ const Leaderboard = {
       if (cached && Date.now() - cached.ts < LEADERBOARD_CACHE_MS) this.champion = cached.text || "暂无王者";
     } catch (_) {}
     this.load({ silent: true }).catch(() => {});
+  },
+  // 改名：清除本地姓名 + 排行榜本地缓存（下次开局重新输入，重新上榜）
+  resetName() {
+    localStorage.removeItem("arrowStormPlayerName");
+    localStorage.removeItem("arrowStormChampionCache");
+    localStorage.removeItem(LEADERBOARD_LOCAL_KEY);
+    try { localStorage.removeItem("arrowStormLeaderboardSubmitAt:无名箭客"); } catch (_) {}
+    const input = prompt("请输入新的玩家名称（最多10字）", "");
+    const name = this.sanitizeName(input);
+    localStorage.setItem("arrowStormPlayerName", name);
+    this.flashMessage && this.flashMessage(`玩家名称已更新：${name}`);
   }
 };
 
@@ -4432,6 +4443,15 @@ function drawLeaderboard(g, state) {
   }
 
   drawButton(g, CONFIG.W / 2 - 70, 850, 140, 54, "返回");
+  // 改名按钮：清除本地姓名，下次开局重新输入
+  g.fillStyle = "rgba(255,170,90,0.16)";
+  roundRect(g, CONFIG.W / 2 + 90, 856, 120, 42, 10); g.fill();
+  g.strokeStyle = "rgba(255,170,90,0.5)";
+  g.lineWidth = 2;
+  roundRect(g, CONFIG.W / 2 + 90, 856, 120, 42, 10); g.stroke();
+  g.fillStyle = "#ffaa5a";
+  g.font = "bold 15px Microsoft YaHei, sans-serif";
+  g.fillText("改名", CONFIG.W / 2 + 150, 884);
   g.restore();
 }
 
@@ -4676,6 +4696,8 @@ function activateAt(x, y) {
       }
     }
     if (x >= CONFIG.W / 2 - 70 && x <= CONFIG.W / 2 + 70 && y >= 850 && y <= 904) game.closeLeaderboard();
+    // 改名按钮（返回按钮右侧）
+    if (x >= CONFIG.W / 2 + 90 && x <= CONFIG.W / 2 + 210 && y >= 856 && y <= 898) Leaderboard.resetName();
   } else if (game.state === "SHOP") {
     const tab = game.shopTab || 0;
     // 返回按钮（y 882-926）
