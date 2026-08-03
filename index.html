@@ -501,10 +501,36 @@ class Arrow {
     this.split = false;
     this.volt = 0;
     this.frostfire = false;
+    this.homing = false;
     this.hitIds = new Set();
   }
   update(dt, game) {
     this.lastX = this.x; this.lastY = this.y;
+    // 追踪箭：持续朝最近敌人转向（拐弯追人）
+    if (this.homing) {
+      let best = null, bestD = 999999;
+      for (const e of game.enemies.active()) {
+        if (e.dead || this.hitIds.has(e.id)) continue;
+        const d = Util.dist2(this, e);
+        if (d < bestD) { best = e; bestD = d; }
+      }
+      if (best) {
+        const wantAngle = Math.atan2(best.x - this.x, -(best.y - this.y));
+        // 当前朝向角
+        let curAngle = Math.atan2(this.vx, -this.vy);
+        // 最短角差转向（每秒 10 rad 追踪速率）
+        let diff = wantAngle - curAngle;
+        while (diff > Math.PI) diff -= TAU;
+        while (diff < -Math.PI) diff += TAU;
+        const turn = Util.clamp(diff, -10 * dt, 10 * dt);
+        curAngle += turn;
+        const sp = Math.hypot(this.vx, this.vy);
+        this.vx = Math.sin(curAngle) * sp;
+        this.vy = -Math.cos(curAngle) * sp;
+        // 追踪尾迹：金色轨迹
+        if (Math.random() < 0.7) game.particles.get(this.x, this.y, Util.rand(-8, 8), Util.rand(-8, 8), 0.3, "#f7c948", Util.rand(1.5, 3));
+      }
+    }
     this.x += this.vx * dt;
     this.y += this.vy * dt;
     this.travel += Math.hypot(this.vx * dt, this.vy * dt);
@@ -532,7 +558,8 @@ class Arrow {
         // 乘区联动 1：分裂箭 —— 命中生成 2 支小箭（30% 伤害）
         if (this.split) {
           for (const da of [-0.22, 0.22]) {
-            game.arrows.get(this.x, this.y, this.angle + da, this.damage * 0.3, this.range * 0.6, 0, this.critChance, this.fire, this.ice);
+            const sub = game.arrows.get(this.x, this.y, this.angle + da, this.damage * 0.3, this.range * 0.6, 0, this.critChance, this.fire, this.ice);
+            sub.homing = this.homing;
           }
         }
         // 乘区联动 2：雷电箭 —— 弹射至最近其他敌人（50% 伤害）
@@ -1115,6 +1142,7 @@ class Player {
     this.spirit = false;
     this.lifesteal = 0;
     this.orb = 0;
+    this.homing = false;
     this.swords = [];
     this.inv = 0;
     this.fireT = 0;
@@ -1329,6 +1357,7 @@ const UPGRADES = [
   { id: "pierce", name: "穿透", icon: "穿", rarity: "epic", faction: "shot", desc: "箭矢穿透 +1", max: 3, has: g => g.player.pierce >= 3, apply: g => { g.player.pierce = Math.min(3, g.player.pierce + 1); } },
   { id: "crit", name: "会心", icon: "暴", rarity: "rare", faction: "shot", desc: "暴击率 +12%（2 倍伤害）", max: 0.6, has: g => g.player.crit >= 0.6, apply: g => { g.player.crit = Math.min(0.6, g.player.crit + 0.12); } },
   { id: "split", name: "分裂箭", icon: "裂", rarity: "legendary", faction: "shot", desc: "命中时分裂 2 支小箭（30% 伤害）", max: 1, has: g => g.player.split, apply: g => { g.player.split = true; } },
+  { id: "homing", name: "追踪箭", icon: "导", rarity: "epic", faction: "shot", desc: "箭矢自动追踪敌人（可拐弯）", max: 1, has: g => g.player.homing, apply: g => { g.player.homing = true; } },
   // ── 元素系 ──
   { id: "fire", name: "火焰箭", icon: "火", rarity: "epic", faction: "elem", desc: "命中灼烧 3 秒（8/秒）", max: 1, has: g => g.player.fire, apply: g => { g.player.fire = true; } },
   { id: "ice", name: "冰霜箭", icon: "冰", rarity: "epic", faction: "elem", desc: "命中减速 50% 2.5 秒", max: 1, has: g => g.player.ice, apply: g => { g.player.ice = true; } },
@@ -1887,14 +1916,26 @@ class Game {
   }
   fireArrows() {
     const n = this.player.arrowCount;
-    const spread = n === 1 ? 0 : 0.34;
+    // 自动瞄准：找最近的非死亡敌人（弓箭传说2 核心手感），无敌人时垂直向上
+    let targetAngle = 0;
+    let best = null, bestD = 999999;
+    for (const e of this.enemies.active()) {
+      if (e.dead) continue;
+      const d = Util.dist2(this.player, e);
+      if (d < bestD) { best = e; bestD = d; }
+    }
+    if (best) {
+      targetAngle = Math.atan2(best.x - this.player.x, -(best.y - this.player.y));
+    }
+    const spread = n === 1 ? 0 : 0.3;
     for (let i = 0; i < n; i++) {
       const t = n === 1 ? 0 : (i / (n - 1) - 0.5) * spread;
-      const a = this.arrows.get(this.player.x, this.player.y - 36, t, this.player.damage, this.player.range, this.player.pierce, this.player.crit, this.player.fire, this.player.ice);
+      const a = this.arrows.get(this.player.x, this.player.y - 36, targetAngle + t, this.player.damage, this.player.range, this.player.pierce, this.player.crit, this.player.fire, this.player.ice);
       a.split = this.player.split;
       a.volt = this.player.volt;
       a.frostfire = this.player.frostfire;
       a.lifesteal = this.player.lifesteal;
+      a.homing = this.player.homing;
     }
     // 射击后座：玩家轻微下压 + 弓口火光粒子
     this.player.knockY += 26;
