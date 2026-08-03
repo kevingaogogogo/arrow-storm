@@ -2200,6 +2200,8 @@ class Game {
     };
   }
   enterRoom(chapter, roomIndex) {
+    // 跨章判定：进入新章节时商店商品刷新（同章内共享一批，防重复堆叠）
+    const newChapter = chapter !== this.chapter;
     this.chapter = chapter;
     this.roomIndex = roomIndex;
     this.roomType = ROOM_SEQUENCE[this.roomIndex];
@@ -2211,7 +2213,7 @@ class Game {
     this.gate = null;
     this.chest = null;
     this.boss = null;
-    this.inRunShop = null;
+    if (newChapter) this.inRunShop = null; // 仅新章重置商店商品
     this.arrows.items.length = 0;
     this.bullets.items.length = 0;
     this.enemies.items.length = 0;
@@ -2264,7 +2266,8 @@ class Game {
     }
   }
   spawnShopRoom() {
-    this.inRunShop = { items: getInRunShopItems(), pulse: 0 };
+    // 同章内商店共享同一批商品（已买的不重置，防重复购买堆叠）
+    if (!this.inRunShop) this.inRunShop = { items: getInRunShopItems(), pulse: 0 };
     this.flashMessage("神秘商人：局内金币可购买临时强化");
   }
   // 局内商店：战斗中随时打开（暂停战斗，花局内金币买临时强化）
