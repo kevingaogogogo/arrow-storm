@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-  <title>箭雨 v3.26</title>
+  <title>箭雨 v3.27</title>
   <style>
     html, body {
       margin: 0;
@@ -50,8 +50,8 @@
   </style>
 </head>
 <body>
-  <canvas id="game" width="540" height="960" aria-label="箭雨 v3.26 游戏画布"></canvas>
-  <div id="landscapeBlocker">请旋转设备为竖屏<br>箭雨 v3.26 仅支持竖屏飞行</div>
+  <canvas id="game" width="540" height="960" aria-label="箭雨 v3.27 游戏画布"></canvas>
+  <div id="landscapeBlocker">请旋转设备为竖屏<br>箭雨 v3.27 仅支持竖屏飞行</div>
 <script>
 "use strict";
 
@@ -1050,9 +1050,14 @@ class Enemy {
       game.spawnChest();
     }
     // 分裂词缀：精英死亡分裂成 2 个小兵
-    if (this.isElite && this.eliteAffix === "splitter") {
+    // ⚠️ 关键：分裂出的 minion 必须强制非精英——否则 Enemy.init 有 18-30% 概率
+    // 再随机成 splitter 精英 → 杀掉又分裂 → 无限循环 → 房间永远清不完（卡死根因！）
+    if (this.isElite && this.eliteAffix === "splitter" && !this._noSplit) {
       for (let i = 0; i < 2; i++) {
-        game.enemies.get("minion", this.x + (i ? 50 : -50), this.y + 20, game.wave);
+        const sub = game.enemies.get("minion", this.x + (i ? 50 : -50), this.y + 20, game.wave);
+        sub.isElite = false;
+        sub.eliteAffix = null;
+        sub._noSplit = true; // 保险：即使意外标记精英也不分裂
       }
       game.flashMessage("精英分裂成 2 个小兵！");
     }
@@ -1279,8 +1284,10 @@ class Enemy {
           }
         } else if (mode === 1) {
           this.shootT = (1.8 * cdMult);
-          game.enemies.get("minion", this.x + Util.rand(-40, 40), this.y + 70, game.wave);
-          game.enemies.get("minion", this.x + Util.rand(-40, 40), this.y + 85, game.wave);
+          const sm1 = game.enemies.get("minion", this.x + Util.rand(-40, 40), this.y + 70, game.wave);
+          const sm2 = game.enemies.get("minion", this.x + Util.rand(-40, 40), this.y + 85, game.wave);
+          sm1.isElite = false; sm1.eliteAffix = null; sm1._noSplit = true; // Boss 召唤物非精英
+          sm2.isElite = false; sm2.eliteAffix = null; sm2._noSplit = true;
         } else if (mode === 2) {
           this.shootT = (1.2 * cdMult);
           const a = Math.atan2(py - this.y, px - this.x);
@@ -1355,7 +1362,8 @@ class Enemy {
           }
         } else if (mode === 1) {
           this.shootT = (2.2 * cdMult);
-          game.enemies.get("tank", this.x + Util.rand(-50, 50), this.y + 80, game.wave);
+          const stk = game.enemies.get("tank", this.x + Util.rand(-50, 50), this.y + 80, game.wave);
+          stk.isElite = false; stk.eliteAffix = null; stk._noSplit = true; // Boss 召唤物非精英
         } else if (mode === 2) {
           this.shootT = (0.7 * cdMult);
           const a = Math.atan2(py - this.y, px - this.x);
@@ -2243,22 +2251,10 @@ const SaveSystem = {
 SaveSystem.load();
 
 // 局外成长 → 玩家初始属性加成
+// 永久成长仅 = 英雄天赋树（装备/天赋系统已移除，局内商店只做临时强化）
 function applyMetaProgression(p) {
   const s = SaveSystem.data;
-  // 装备：猎弓/法杖强化 = 伤害/射速（砍半防爆炸：18%→10%，10%→6%）
-  const bow = s.equip.bow;
-  p.damage = CONFIG.BASE_ARROW_DAMAGE * (1 + bow * 0.10);
-  p.fireRate = CONFIG.BASE_FIRE_RATE * (1 + bow * 0.06);
-  // 护符 = 暴击（8%→5%）
-  p.crit = Math.min(0.6, s.equip.charm * 0.05);
-  // 法阵 = 元素强度（25%→12%）
-  p.elemBoost = 1 + s.equip.sigil * 0.12;
-  // 天赋：伤害 / 生命 / 初始箭数（12%→6%，15→10）
-  p.damage *= 1 + s.talents.dmg * 0.06;
-  p.maxHp = 40 + s.talents.hp * 10;
-  p.hp = p.maxHp;
-  p.arrowCount = Math.min(5, 1 + s.talents.arrow);
-  // 英雄天赋树加成（局外成长，全部砍半防爆炸）
+  // 英雄天赋树加成（局外唯一成长源）
   const ht = s.heroTree || {};
   p.damage *= 1 + (ht.dmg || 0) * 0.025;
   p.fireRate *= 1 + (ht.rate || 0) * 0.02;
@@ -2596,25 +2592,10 @@ class Game {
   dismissInRunShop() {
     this.inRunShop = null;
   }
-  // 局内购买永久成长（装备/天赋/皮肤），花局外金币，实时生效
+  // 局内购买武器（花局内金币，本局生效，死亡回免费武器）
   buyMetaFromInRun(kind, slot) {
     const s = SaveSystem.data;
-    if (kind === "equip") {
-      if (!SaveSystem.canBuyEquip(slot)) return false;
-      SaveSystem.buyEquip(slot);
-      // 实时应用：装备加成为乘区（在局内当前基础上乘），不覆盖局内升级
-      const lv = s.equip[slot];
-      if (slot === "bow") { this.player.damage = Math.round(this.player.damage * (1 + 0.10)); this.player.fireRate = Math.min(6, this.player.fireRate * 1.06); }
-      else if (slot === "charm") this.player.crit = Math.min(0.6, this.player.crit + 0.05);
-      else if (slot === "sigil") this.player.elemBoost = Math.min(3, (this.player.elemBoost || 1) * 1.12);
-    } else if (kind === "talent") {
-      if (!SaveSystem.canBuyTalent(slot)) return false;
-      SaveSystem.buyTalent(slot);
-      const lv = s.talents[slot];
-      if (slot === "dmg") this.player.damage = Math.round(this.player.damage * (1 + 0.06));
-      else if (slot === "hp") { const add = 10; this.player.maxHp = Math.min(240, this.player.maxHp + add); this.player.hp = Math.min(this.player.maxHp, this.player.hp + add); }
-      else if (slot === "arrow") this.player.arrowCount = Math.min(3, this.player.arrowCount + 1);
-    } else if (kind === "weapon") {
+    if (kind === "weapon") {
       // 武器 = 局内临时增强：花局内金币，本局生效，死亡后回免费武器（不永久）
       if (slot === "cat") {
         // 局内切换路线：仅本局生效（用局内金币）
@@ -3648,7 +3629,6 @@ function drawChoiceCards(g, state) {
 function drawInRunShop(g, state) {
   if (!state.inRunShop) return;
   const items = state.inRunShop.items || [];
-  const tab = state.inRunShop.tab || 0; // 0=局内强化 1=永久成长
   g.save();
   g.fillStyle = "rgba(9,13,16,0.82)";
   roundRect(g, 24, 132, 492, 476, 10); g.fill();
@@ -3661,131 +3641,61 @@ function drawInRunShop(g, state) {
   g.fillText("神秘商人", CONFIG.W / 2, 166);
   g.fillStyle = "#f7c948";
   g.font = "bold 16px Microsoft YaHei, sans-serif";
-  g.fillText(tab === 0 ? `局内金币 ${state.runGold || 0}` : `永久金币 ${SaveSystem.data.gold}`, CONFIG.W / 2, 192);
-  // 页签：局内强化 / 永久成长
-  const tabs = [
-    { label: "局内强化", x: 150, w: 120 },
-    { label: "永久成长", x: 390, w: 120 }
-  ];
-  tabs.forEach((tb, i) => {
-    g.fillStyle = i === tab ? "#a865ff" : "rgba(255,255,255,0.1)";
-    roundRect(g, tb.x - tb.w / 2, 200, tb.w, 30, 8); g.fill();
-    g.fillStyle = i === tab ? "#fff" : "#9aa5b4";
+  g.fillText(`局内金币 ${state.runGold || 0}`, CONFIG.W / 2, 192);
+  // 局内强化 6 格（2 行 3 列）
+  const w = 146, h = 88, gap = 14;
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    const col = i % 3;
+    const row = Math.floor(i / 3);
+    const x = 48 + col * (w + gap);
+    const y = 246 + row * 102;
+    const afford = (state.runGold || 0) >= item.price;
+    g.fillStyle = item.sold ? "rgba(255,255,255,0.08)" : afford ? "rgba(247,201,72,0.16)" : "rgba(255,255,255,0.08)";
+    roundRect(g, x, y, w, h, 8); g.fill();
+    g.strokeStyle = item.sold ? "rgba(255,255,255,0.14)" : afford ? "rgba(247,201,72,0.55)" : "rgba(255,255,255,0.18)";
+    g.lineWidth = 2;
+    roundRect(g, x, y, w, h, 8); g.stroke();
+    g.fillStyle = item.sold ? "#8a94a3" : "#f7c948";
+    g.font = "bold 22px Microsoft YaHei, sans-serif";
+    g.fillText(item.icon, x + w / 2, y + 28);
+    g.fillStyle = "#f5ecd9";
     g.font = "bold 14px Microsoft YaHei, sans-serif";
-    g.fillText(tb.label, tb.x, 221);
-  });
-  if (tab === 0) {
-    const w = 146, h = 88, gap = 14;
-    for (let i = 0; i < items.length; i++) {
-      const item = items[i];
-      const col = i % 3;
-      const row = Math.floor(i / 3);
-      const x = 48 + col * (w + gap);
-      const y = 246 + row * 102;
-      const afford = (state.runGold || 0) >= item.price;
-      g.fillStyle = item.sold ? "rgba(255,255,255,0.08)" : afford ? "rgba(247,201,72,0.16)" : "rgba(255,255,255,0.08)";
-      roundRect(g, x, y, w, h, 8); g.fill();
-      g.strokeStyle = item.sold ? "rgba(255,255,255,0.14)" : afford ? "rgba(247,201,72,0.55)" : "rgba(255,255,255,0.18)";
-      g.lineWidth = 2;
-      roundRect(g, x, y, w, h, 8); g.stroke();
-      g.fillStyle = item.sold ? "#8a94a3" : "#f7c948";
-      g.font = "bold 22px Microsoft YaHei, sans-serif";
-      g.fillText(item.icon, x + w / 2, y + 28);
-      g.fillStyle = "#f5ecd9";
-      g.font = "bold 14px Microsoft YaHei, sans-serif";
-      g.fillText(item.name, x + w / 2, y + 50);
-      g.fillStyle = item.sold ? "#8a94a3" : afford ? "#f7c948" : "#c2a06a";
-      g.font = "12px Microsoft YaHei, sans-serif";
-      g.fillText(item.sold ? "已购买" : `${item.price} 金币`, x + w / 2, y + 72);
-    }
-    // 武器区（局内金币购买，本局生效，死亡回免费武器）
-    const s = SaveSystem.data;
-    const wy = 458;
-    g.fillStyle = "#9aa5b4";
+    g.fillText(item.name, x + w / 2, y + 50);
+    g.fillStyle = item.sold ? "#8a94a3" : afford ? "#f7c948" : "#c2a06a";
     g.font = "12px Microsoft YaHei, sans-serif";
-    g.textAlign = "left";
-    g.fillText(isStaveMode() ? "武器（法杖，本局）" : "武器（弓，本局）", 44, wy - 6);
-    g.font = "10px Microsoft YaHei, sans-serif";
-    g.fillStyle = "#7a8594";
-    g.fillText("本局生效 · 死亡回免费武器", 44, wy + 6);
-    const wList = isStaveMode() ? WEAPON_STAVES : WEAPON_SKINS;
-    wList.forEach((w, i) => {
-      const wx = 44 + i * 120;
-      const current = (typeof game.player.weaponSkinOverride === "number" ? game.player.weaponSkinOverride : 0) === i;
-      const afford = (state.runGold || 0) >= w.price;
-      g.fillStyle = current ? "#2a2418" : "#1a2029";
-      roundRect(g, wx, wy + 14, 112, 56, 8); g.fill();
-      if (current) { g.strokeStyle = "#f7c948"; g.lineWidth = 2; roundRect(g, wx, wy + 14, 112, 56, 8); g.stroke(); }
-      else if (afford) { g.strokeStyle = "rgba(247,201,72,0.4)"; g.lineWidth = 1; roundRect(g, wx, wy + 14, 112, 56, 8); g.stroke(); }
-      g.fillStyle = w.color;
-      g.font = "bold 16px Microsoft YaHei, sans-serif";
-      g.fillText(w.icon, wx + 24, wy + 38);
-      g.fillStyle = current ? "#f7c948" : "#e8eef6";
-      g.font = "bold 11px Microsoft YaHei, sans-serif";
-      g.fillText(w.name, wx + 44, wy + 32);
-      g.fillStyle = current ? "#f7c948" : afford ? "#f7c948" : "#8a94a3";
-      g.font = "10px Microsoft YaHei, sans-serif";
-      g.fillText(current ? "使用中" : `${w.price}💰`, wx + 44, wy + 52);
-    });
-    g.textAlign = "center";
-  } else {
-    // 永久成长：装备 3 卡一行 + 天赋 3 卡一行 + 武器路线（花永久金币）
-    const s = SaveSystem.data;
-    const equips = [
-      { slot: "bow", name: isStaveMode() ? "法杖强化" : "猎弓", lv: s.equip.bow, desc: `伤害+${s.equip.bow * 10}% 射速+${s.equip.bow * 6}%` },
-      { slot: "charm", name: "护符", lv: s.equip.charm, desc: `暴击+${s.equip.charm * 5}%` },
-      { slot: "sigil", name: "法阵", lv: s.equip.sigil, desc: `元素+${s.equip.sigil * 12}%` }
-    ];
-    const talents = [
-      { slot: "dmg", name: "力量", lv: s.talents.dmg, desc: `伤害+${s.talents.dmg * 6}%` },
-      { slot: "hp", name: "体质", lv: s.talents.hp, desc: `生命+${s.talents.hp * 10}` },
-      { slot: "arrow", name: "箭术", lv: s.talents.arrow, desc: `箭数+${s.talents.arrow}` }
-    ];
-    // 分组标题 + 3 卡横排（每卡 150×92）
-    const drawRow = (label, arr, y, buyFn) => {
-      g.fillStyle = "#9aa5b4";
-      g.font = "12px Microsoft YaHei, sans-serif";
-      g.textAlign = "left";
-      g.fillText(label, 44, y - 6);
-      arr.forEach((it, i) => {
-        const x = 44 + i * 158;
-        g.fillStyle = "#1a2029";
-        roundRect(g, x, y, 150, 92, 10); g.fill();
-        g.strokeStyle = "rgba(255,255,255,0.12)";
-        g.lineWidth = 1;
-        roundRect(g, x, y, 150, 92, 10); g.stroke();
-        // 图标
-        g.fillStyle = "#5fc6ff";
-        g.font = "bold 20px Microsoft YaHei, sans-serif";
-        g.fillText(label === "装备" ? "装" : "天", x + 20, y + 34);
-        // 名称 + Lv
-        g.fillStyle = "#e8eef6";
-        g.font = "bold 14px Microsoft YaHei, sans-serif";
-        g.fillText(`${it.name} Lv.${it.lv}/3`, x + 52, y + 26);
-        // 描述
-        g.fillStyle = "#9aa5b4";
-        g.font = "11px Microsoft YaHei, sans-serif";
-        g.fillText(it.desc, x + 52, y + 46);
-        // 价格/满级按钮
-        const maxed = it.lv >= 3;
-        const price = it.price;
-        const afford = !maxed && s.gold >= price;
-        g.fillStyle = maxed ? "rgba(74,222,128,0.25)" : afford ? "#f7c948" : "rgba(247,201,72,0.3)";
-        roundRect(g, x + 52, y + 58, 86, 22, 6); g.fill();
-        g.fillStyle = maxed ? "#4ade80" : afford ? "#1a1408" : "#8a94a3";
-        g.font = "bold 12px Microsoft YaHei, sans-serif";
-        g.fillText(maxed ? "已满级" : `${price}💰`, x + 95, y + 74);
-      });
-    };
-    drawRow("装备", equips.map(e => ({ ...e, price: SaveSystem.equipPrice(e.slot) })), 246, "equip");
-    drawRow("天赋", talents.map(t => ({ ...t, price: SaveSystem.talentPrice(t.slot) })), 352, "talent");
-    // 说明：武器已改为局内临时增强（局内强化页购买，本局生效）
-    g.textAlign = "center";
-    g.fillStyle = "#7a8594";
-    g.font = "11px Microsoft YaHei, sans-serif";
-    g.fillText("武器为局内临时增强，请在「局内强化」页购买（本局生效）", CONFIG.W / 2, 470);
-    g.textAlign = "center";
+    g.fillText(item.sold ? "已购买" : `${item.price} 金币`, x + w / 2, y + 72);
   }
+  // 武器区（局内金币购买，本局生效，死亡回免费武器）
+  const s = SaveSystem.data;
+  const wy = 458;
+  g.fillStyle = "#9aa5b4";
+  g.font = "12px Microsoft YaHei, sans-serif";
+  g.textAlign = "left";
+  g.fillText(isStaveMode() ? "武器（法杖，本局）" : "武器（弓，本局）", 44, wy - 6);
+  g.font = "10px Microsoft YaHei, sans-serif";
+  g.fillStyle = "#7a8594";
+  g.fillText("本局生效 · 死亡回免费武器", 44, wy + 6);
+  const wList = isStaveMode() ? WEAPON_STAVES : WEAPON_SKINS;
+  wList.forEach((w, i) => {
+    const wx = 44 + i * 120;
+    const current = (typeof game.player.weaponSkinOverride === "number" ? game.player.weaponSkinOverride : 0) === i;
+    const afford = (state.runGold || 0) >= w.price;
+    g.fillStyle = current ? "#2a2418" : "#1a2029";
+    roundRect(g, wx, wy + 14, 112, 56, 8); g.fill();
+    if (current) { g.strokeStyle = "#f7c948"; g.lineWidth = 2; roundRect(g, wx, wy + 14, 112, 56, 8); g.stroke(); }
+    else if (afford) { g.strokeStyle = "rgba(247,201,72,0.4)"; g.lineWidth = 1; roundRect(g, wx, wy + 14, 112, 56, 8); g.stroke(); }
+    g.fillStyle = w.color;
+    g.font = "bold 16px Microsoft YaHei, sans-serif";
+    g.fillText(w.icon, wx + 24, wy + 38);
+    g.fillStyle = current ? "#f7c948" : "#e8eef6";
+    g.font = "bold 11px Microsoft YaHei, sans-serif";
+    g.fillText(w.name, wx + 44, wy + 32);
+    g.fillStyle = current ? "#f7c948" : afford ? "#f7c948" : "#8a94a3";
+    g.font = "10px Microsoft YaHei, sans-serif";
+    g.fillText(current ? "使用中" : `${w.price}💰`, wx + 44, wy + 52);
+  });
+  g.textAlign = "center";
   g.fillStyle = "#b9c2d0";
   g.font = "13px Microsoft YaHei, sans-serif";
   g.fillText("购买后穿过下方传送门继续闯关", CONFIG.W / 2, 568);
@@ -4448,7 +4358,7 @@ function drawMenu(g, state) {
   g.shadowBlur = 6 + 6 * pulse;
   g.fillStyle = "#d4c6af";
   g.font = "20px Microsoft YaHei, sans-serif";
-  g.fillText("v3.26 · 房间闯关 · 排行榜 · 每日挑战", CONFIG.W / 2, 292);
+  g.fillText("v3.27 · 房间闯关 · 排行榜 · 每日挑战", CONFIG.W / 2, 292);
   g.fillStyle = "#ffe59a";
   g.font = "bold 18px Microsoft YaHei, sans-serif";
   g.fillText(Leaderboard.champion || "暂无王者", CONFIG.W / 2, 326);
@@ -4488,10 +4398,7 @@ function drawMenu(g, state) {
   g.fillStyle = "#ffaa5a";
   g.font = "bold 17px Microsoft YaHei, sans-serif";
   g.fillText(`图鉴 ${codexProgress("monsters").got + codexProgress("skills").got + codexProgress("skins").got}/${CODEX_MONSTERS.length + CODEX_SKILLS.length + WEAPON_SKINS.length}`, CONFIG.W / 2, 642);
-  // 永久金币显示（局内商店可用）+ 排行榜按钮
-  g.fillStyle = "#f7c948";
-  g.font = "bold 14px Microsoft YaHei, sans-serif";
-  g.fillText(`永久金币 ${SaveSystem.data.gold} 💰（局内商店可用）`, CONFIG.W / 2, 676);
+  // 排行榜按钮
   g.fillStyle = "rgba(168,101,255,0.18)";
   roundRect(g, CONFIG.W / 2 - 88, 692, 176, 42, 10); g.fill();
   g.strokeStyle = "rgba(168,101,255,0.5)";
@@ -4617,7 +4524,7 @@ function drawGameOver(g, state) {
   }
   g.fillStyle = "#a9977d";
   g.font = "13px Microsoft YaHei, sans-serif";
-  g.fillText(`英雄 Lv.${SaveSystem.data.heroLevel}（经验 ${SaveSystem.data.heroExp}/${heroExpNeed(SaveSystem.data.heroLevel)}）· 永久金币 ${SaveSystem.data.gold} 💰 可在局内商店消费`, CONFIG.W / 2, 596);
+  g.fillText(`英雄 Lv.${SaveSystem.data.heroLevel}（经验 ${SaveSystem.data.heroExp}/${heroExpNeed(SaveSystem.data.heroLevel)}）`, CONFIG.W / 2, 596);
   g.restore();
 }
 
@@ -4722,64 +4629,30 @@ function activateAt(x, y) {
   if (x >= CONFIG.W - 86 && x <= CONFIG.W - 46 && y >= 16 && y <= 46) { audio.toggle(); return; }
   if (game.state === "PLAY" && game.inRunShop) {
     const shop = game.inRunShop;
-    const tab = shop.tab || 0;
     // 关闭按钮（y 578-608，所有模式）
     if (x >= CONFIG.W / 2 - 50 && x <= CONFIG.W / 2 + 50 && y >= 578 && y <= 608) {
       game.dismissInRunShop();
       return;
     }
-    // 页签切换
-    if (y >= 200 && y <= 230) {
-      if (x >= 90 && x <= 210) { shop.tab = 0; return; }
-      if (x >= 330 && x <= 450) { shop.tab = 1; return; }
+    // 局内强化 6 格（y 246/348，h 88）
+    const w = 146, h = 88, gap = 14;
+    for (let i = 0; i < shop.items.length; i++) {
+      const col = i % 3;
+      const row = Math.floor(i / 3);
+      const bx = 48 + col * (w + gap);
+      const by = 246 + row * 102;
+      if (x >= bx && x <= bx + w && y >= by && y <= by + h) {
+        game.buyInRunShop(i);
+        return;
+      }
     }
-    if (tab === 0) {
-      // 局内强化 6 格（y 246/348，h 88）
-      const w = 146, h = 88, gap = 14;
-      for (let i = 0; i < shop.items.length; i++) {
-        const col = i % 3;
-        const row = Math.floor(i / 3);
-        const bx = 48 + col * (w + gap);
-        const by = 246 + row * 102;
-        if (x >= bx && x <= bx + w && y >= by && y <= by + h) {
-          game.buyInRunShop(i);
-          return;
-        }
-      }
-      // 武器区（wy=458：武器卡 y 472-528，x=44+120i 宽 112）
-      const wList = isStaveMode() ? WEAPON_STAVES : WEAPON_SKINS;
-      for (let i = 0; i < wList.length; i++) {
-        const wx = 44 + i * 120;
-        if (x >= wx && x <= wx + 112 && y >= 472 && y <= 528) {
-          game.buyMetaFromInRun("weapon", i);
-          return;
-        }
-      }
-    } else {
-      // 永久成长：装备 3 卡一行(246-338) + 天赋 3 卡一行(352-444)
-      const eqSlots = ["bow", "charm", "sigil"];
-      const tSlots = ["dmg", "hp", "arrow"];
-      // 装备行（每卡 x=44+158i，宽 150，价格按钮 x+52~x+138, y+58~y+80）
-      for (let i = 0; i < 3; i++) {
-        const cx = 44 + i * 158;
-        if (x >= cx && x <= cx + 150 && y >= 246 && y <= 338) {
-          if (x >= cx + 52 && x <= cx + 138 && y >= 304 && y <= 326) {
-            game.buyMetaFromInRun("equip", eqSlots[i]);
-            return;
-          }
-          return;
-        }
-      }
-      // 天赋行
-      for (let i = 0; i < 3; i++) {
-        const cx = 44 + i * 158;
-        if (x >= cx && x <= cx + 150 && y >= 352 && y <= 444) {
-          if (x >= cx + 52 && x <= cx + 138 && y >= 410 && y <= 432) {
-            game.buyMetaFromInRun("talent", tSlots[i]);
-            return;
-          }
-          return;
-        }
+    // 武器区（wy=458：武器卡 y 472-528，x=44+120i 宽 112）
+    const wList = isStaveMode() ? WEAPON_STAVES : WEAPON_SKINS;
+    for (let i = 0; i < wList.length; i++) {
+      const wx = 44 + i * 120;
+      if (x >= wx && x <= wx + 112 && y >= 472 && y <= 528) {
+        game.buyMetaFromInRun("weapon", i);
+        return;
       }
     }
   }
