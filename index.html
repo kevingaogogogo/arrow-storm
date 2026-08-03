@@ -2098,6 +2098,8 @@ function activateAt(x, y) {
 }
 
 window.addEventListener("keydown", e => {
+  // AI 演示模式：键盘不干预
+  if (DEMO) return;
   if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A") game.input.left = 1;
   if (e.key === "ArrowRight" || e.key === "d" || e.key === "D") game.input.right = 1;
   // 三选一：键盘 1/2/3 直接选择
@@ -2116,6 +2118,8 @@ window.addEventListener("keyup", e => {
   if (e.key === "ArrowRight" || e.key === "d" || e.key === "D") game.input.right = 0;
 });
 canvas.addEventListener("pointerdown", e => {
+  // AI 演示模式：禁用一切指针输入
+  if (DEMO) return;
   const p = canvasPoint(e);
   activateAt(p.x, p.y);
   game.input.touching = true;
@@ -2123,6 +2127,8 @@ canvas.addEventListener("pointerdown", e => {
   canvas.setPointerCapture(e.pointerId);
 });
 canvas.addEventListener("pointermove", e => {
+  // AI 演示模式：禁用鼠标悬停控制，AI 独占
+  if (DEMO) return;
   const p = canvasPoint(e);
   // PC 鼠标：未按下时悬停即可控制角色（跟随鼠标X）
   if (!game.input.touching && e.pointerType === "mouse") {
