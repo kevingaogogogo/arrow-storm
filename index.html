@@ -613,10 +613,10 @@ class Enemy {
     this.y += scroll;
     if (this.fireT > 0) {
       this.fireT -= dt;
-      this.takeDot(8 * (game.player.elemBoost || 1) * dt, game, "#e54d3c");
+      this.takeDot(8 * (game.player.elemBoost || 1) * (game.player.burnMult || 1) * dt, game, "#e54d3c");
     }
     if (this.iceT > 0) this.iceT -= dt;
-    const slow = this.iceT > 0 ? 0.5 : 1;
+    const slow = this.iceT > 0 ? 0.5 / (game.player.slowMult || 1) : 1;
     // 逼近压力：所有敌人随波次缓慢下压（随飞行滚动），波次越高压得越快
     // 基础下压速度：随波次递增（5波后开始明显，防站桩）
     const press = Math.min(46, Math.max(0, (game.wave - 3) * 5)) * slow;
@@ -921,6 +921,8 @@ class Player {
     this.swords = [];
     this.inv = 0;
     this.fireT = 0;
+    this.lastX = this.x;
+    this.lastY = this.y;
     this.knockX = 0;
     this.knockY = 0;
   }
@@ -946,6 +948,8 @@ class Player {
     else if (game.input.hover) targetX = game.input.hoverX;
     else targetX += (game.input.right - game.input.left) * this.moveSpeed * dt;
     this.x += (targetX - this.x) * (game.input.touching || game.input.hover ? Math.min(1, dt * 14) : 1);
+    this.lastX = this.x;
+    this.lastY = this.y;
     this.x += this.knockX * dt;
     this.y += this.knockY * dt;
     this.knockX *= Math.pow(0.05, dt);
@@ -995,29 +999,89 @@ class Player {
     g.beginPath();
     g.arc(this.x, this.y, haloR, 0, TAU);
     g.stroke();
-    g.shadowBlur = 28;
-    g.shadowColor = CONFIG.COLORS.purple;
-    const grad = g.createRadialGradient(this.x - 6, this.y - 8, 4, this.x, this.y, 26);
-    grad.addColorStop(0, "#fff7ff");
-    grad.addColorStop(0.35, "#b77cff");
-    grad.addColorStop(1, "#5e34ba");
-    g.fillStyle = grad;
+    // ── 人形主角 ──
+    const t = performance.now() * 0.006;
+    const moving = Math.abs(this.x - (this.lastX || this.x)) > 1 || Math.abs(this.lastY || 0) > 0;
+    const legSwing = moving ? Math.sin(t * 10) * 4 : Math.sin(t * 3) * 1.5; // 走路/待机呼吸摆动
+    const lean = Util.clamp((this.x - (this.lastX || this.x)) * 0.15, -6, 6); // 移动倾斜
+    const skin = getWeaponSkin();
+    // 武器配色：皮肤色 + 元素色叠加
+    const bowColor = this.fire ? "#ff7b3d" : this.ice ? "#7ad0ff" : this.volt > 0 ? "#f7c948" : skin.color;
+    g.translate(this.x + lean, this.y);
+    // 披风（紫色，飘动）
+    g.fillStyle = "rgba(124,58,180,0.85)";
     g.beginPath();
-    g.arc(this.x, this.y, this.r, 0, TAU);
-    g.fill();
-    g.strokeStyle = "#eadcff";
-    g.lineWidth = 3;
-    g.beginPath();
-    g.moveTo(this.x, this.y - 27);
-    g.lineTo(this.x, this.y - 52);
-    g.stroke();
-    g.fillStyle = "#e8d8ff";
-    g.beginPath();
-    g.moveTo(this.x, this.y - 60);
-    g.lineTo(this.x - 8, this.y - 43);
-    g.lineTo(this.x + 8, this.y - 43);
+    g.moveTo(-6, -14);
+    g.quadraticCurveTo(-14 - Math.sin(t * 5) * 3, 2, -9 + Math.sin(t * 5) * 2, 16);
+    g.lineTo(-2, 12);
+    g.quadraticCurveTo(-1, 0, -2, -14);
     g.closePath();
     g.fill();
+    // 身体（深紫铠甲）
+    g.fillStyle = "#3d2b5e";
+    g.beginPath();
+    g.moveTo(-9, -6);
+    g.quadraticCurveTo(0, -16, 9, -6);
+    g.lineTo(11, 10);
+    g.quadraticCurveTo(0, 14, -11, 10);
+    g.closePath();
+    g.fill();
+    g.fillStyle = "#6b4aa8";
+    g.fillRect(-7, -8, 14, 3);
+    // 双腿（摆动）
+    g.strokeStyle = "#2a1c42";
+    g.lineWidth = 4;
+    g.lineCap = "round";
+    g.beginPath();
+    g.moveTo(-4, 11);
+    g.lineTo(-4 + legSwing * 0.7, 18);
+    g.moveTo(4, 11);
+    g.lineTo(4 - legSwing * 0.7, 18);
+    g.stroke();
+    // 头（皮肤色 + 头发）
+    g.fillStyle = "#e8b98a";
+    g.beginPath();
+    g.arc(0, -17, 8, 0, TAU);
+    g.fill();
+    g.fillStyle = "#4a2a5a";
+    g.beginPath();
+    g.arc(0, -19, 8, Math.PI, 0);
+    g.fill();
+    // 弓（皮肤样式：木弓弯弓 / 火焰弓红 + 火星 / 冰霜弓蓝 + 冰晶 / 雷神弓金 + 电弧）
+    g.strokeStyle = bowColor;
+    g.lineWidth = 3.5;
+    g.shadowBlur = 12;
+    g.shadowColor = bowColor;
+    g.beginPath();
+    g.arc(16, -4, 13, -Math.PI / 2.4, Math.PI / 2.4);
+    g.stroke();
+    g.shadowBlur = 0;
+    // 弓弦
+    g.strokeStyle = "rgba(255,255,255,0.5)";
+    g.lineWidth = 1;
+    g.beginPath();
+    g.moveTo(16 + Math.cos(-Math.PI / 2.4) * 13, -4 + Math.sin(-Math.PI / 2.4) * 13);
+    g.lineTo(16 + Math.cos(Math.PI / 2.4) * 13, -4 + Math.sin(Math.PI / 2.4) * 13);
+    g.stroke();
+    // 皮肤特效：火焰弓火星 / 冰霜弓冰晶 / 雷神弓电弧
+    if (this.fire || skin.id === 1) {
+      g.fillStyle = "rgba(255,140,60,0.9)";
+      g.beginPath();
+      g.arc(20 + Math.sin(t * 9) * 3, -10 + Math.cos(t * 7) * 3, 2, 0, TAU);
+      g.fill();
+    } else if (this.ice || skin.id === 2) {
+      g.fillStyle = "rgba(150,220,255,0.9)";
+      g.beginPath();
+      g.arc(20 + Math.sin(t * 8) * 3, -9 + Math.cos(t * 6) * 3, 1.8, 0, TAU);
+      g.fill();
+    } else if (skin.id === 3) {
+      g.strokeStyle = "rgba(247,201,72,0.8)";
+      g.lineWidth = 1.5;
+      g.beginPath();
+      g.moveTo(26, -10 + Math.sin(t * 12) * 4);
+      g.lineTo(31, -6 + Math.cos(t * 10) * 4);
+      g.stroke();
+    }
     g.restore();
     for (const sword of this.swords) sword.render(g);
     // 环绕火球渲染
@@ -1139,9 +1203,28 @@ const DEFAULTS = {
   gold: 0,
   equip: { bow: 0, charm: 0, sigil: 0 },   // 0-3 级
   talents: { dmg: 0, hp: 0, arrow: 0 },    // 0-3 级
+  weaponSkin: 0,                           // 0=木弓 1=火焰弓 2=冰霜弓 3=雷神弓
   chapter: 1,
   bestWave: 0
 };
+
+// 武器皮肤：不同样式 + 不同加成（换武器动力）
+const WEAPON_SKINS = [
+  { id: 0, name: "木弓", icon: "弓", price: 0, color: "#8b5a2b", desc: "初始武器，无加成", bonus: {} },
+  { id: 1, name: "火焰弓", icon: "🔥", price: 120, color: "#e54d3c", desc: "伤害 +8%，灼烧伤害 +50%", bonus: { dmg: 1.08, burn: 1.5 } },
+  { id: 2, name: "冰霜弓", icon: "❄", price: 150, color: "#5fc6ff", desc: "减速效果 +40%，射速 +6%", bonus: { slow: 1.4, rate: 1.06 } },
+  { id: 3, name: "雷神弓", icon: "⚡", price: 200, color: "#f7c948", desc: "暴击率 +12%，箭速 +15%", bonus: { crit: 0.12, arrowSpeed: 1.15 } }
+];
+function getWeaponSkin() { return WEAPON_SKINS[SaveSystem.data.weaponSkin] || WEAPON_SKINS[0]; }
+function applyWeaponSkin(player) {
+  const skin = getWeaponSkin();
+  if (skin.bonus.dmg) player.damage *= skin.bonus.dmg;
+  if (skin.bonus.rate) player.fireRate *= skin.bonus.rate;
+  if (skin.bonus.crit) player.crit = Math.min(0.6, player.crit + skin.bonus.crit);
+  if (skin.bonus.arrowSpeed) player.arrowSpeed = CONFIG.BASE_ARROW_SPEED * skin.bonus.arrowSpeed;
+  if (skin.bonus.burn) player.burnMult = skin.bonus.burn;
+  if (skin.bonus.slow) player.slowMult = skin.bonus.slow;
+}
 
 const SaveSystem = {
   data: null,
@@ -1155,6 +1238,7 @@ const SaveSystem = {
         gold: parsed.gold || 0,
         equip: { ...DEFAULTS.equip, ...(parsed.equip || {}) },
         talents: { ...DEFAULTS.talents, ...(parsed.talents || {}) },
+        weaponSkin: parsed.weaponSkin || 0,
         chapter: parsed.chapter || 1,
         bestWave: parsed.bestWave || 0
       };
@@ -1206,6 +1290,8 @@ function applyMetaProgression(p) {
   p.maxHp = 100 + s.talents.hp * 15;
   p.hp = p.maxHp;
   p.arrowCount = Math.min(5, 1 + s.talents.arrow);
+  // 武器皮肤加成
+  applyWeaponSkin(p);
 }
 
 class Game {
@@ -1273,7 +1359,7 @@ class Game {
     this.resetWorld();
     this.spawnWave();
   }
-  openShop() { audio.ensure(); this.state = "SHOP"; }
+  openShop() { audio.ensure(); this.state = "SHOP"; this.shopTab = 0; }
   closeShop() { this.state = "MENU"; }
   gameOver() {
     if (this.state !== "PLAY") return;
@@ -1928,46 +2014,130 @@ function drawStonePlatform(g, x, y, r) {
 }
 
 function drawMinion(g) {
-  g.fillStyle = "#7e3d32";
+  // 哥布林：绿皮小怪，红眼，尖耳
+  g.fillStyle = "#3f7a3a";
   g.beginPath();
-  g.arc(0, 0, 20, 0, TAU);
+  g.ellipse(0, 2, 17, 19, 0, 0, TAU);
   g.fill();
-  g.fillStyle = "#d9b37a";
-  g.fillRect(-10, -7, 6, 5);
-  g.fillRect(4, -7, 6, 5);
+  // 尖耳
+  g.fillStyle = "#3f7a3a";
+  g.beginPath();
+  g.moveTo(-12, -8); g.lineTo(-20, -20); g.lineTo(-6, -2); g.closePath();
+  g.moveTo(12, -8); g.lineTo(20, -20); g.lineTo(6, -2); g.closePath();
+  g.fill();
+  // 脸
+  g.fillStyle = "#5a9a4a";
+  g.beginPath();
+  g.ellipse(0, -3, 12, 13, 0, 0, TAU);
+  g.fill();
+  // 红眼
+  g.fillStyle = "#ff4433";
+  g.fillRect(-8, -8, 4, 4);
+  g.fillRect(4, -8, 4, 4);
+  // 嘴巴
+  g.fillStyle = "#2a4a25";
+  g.fillRect(-5, 4, 10, 3);
+  // 獠牙
+  g.fillStyle = "#fff";
+  g.beginPath(); g.moveTo(-4, 6); g.lineTo(-2, 10); g.lineTo(-1, 6); g.closePath(); g.fill();
+  g.beginPath(); g.moveTo(4, 6); g.lineTo(2, 10); g.lineTo(1, 6); g.closePath(); g.fill();
 }
 
 function drawArcher(g) {
-  g.fillStyle = "#664f36";
+  // 骷髅弓手：白骨 + 兜帽 + 弓
+  g.fillStyle = "#d8d4c8";
   g.beginPath();
-  g.arc(0, 0, 20, 0, TAU);
+  g.ellipse(0, 0, 16, 19, 0, 0, TAU);
   g.fill();
-  g.strokeStyle = "#d2a15c";
-  g.lineWidth = 4;
+  // 头骨
+  g.fillStyle = "#f0ece0";
   g.beginPath();
-  g.arc(16, -2, 16, -Math.PI / 2, Math.PI / 2);
+  g.arc(0, -6, 9, 0, TAU);
+  g.fill();
+  // 眼窝
+  g.fillStyle = "#1a1a22";
+  g.fillRect(-6, -9, 4, 5);
+  g.fillRect(2, -9, 4, 5);
+  // 兜帽
+  g.fillStyle = "#5a4a3a";
+  g.beginPath();
+  g.moveTo(-10, -8); g.quadraticCurveTo(0, -22, 10, -8);
+  g.lineTo(8, 4); g.lineTo(-8, 4); g.closePath();
+  g.fill();
+  // 弓（骨弓）
+  g.strokeStyle = "#b8b0a0";
+  g.lineWidth = 3;
+  g.beginPath();
+  g.arc(18, -2, 12, -Math.PI / 2.3, Math.PI / 2.3);
+  g.stroke();
+  g.strokeStyle = "rgba(200,190,170,0.6)";
+  g.lineWidth = 1;
+  g.beginPath();
+  g.moveTo(18 + Math.cos(-Math.PI / 2.3) * 12, -2 + Math.sin(-Math.PI / 2.3) * 12);
+  g.lineTo(18 + Math.cos(Math.PI / 2.3) * 12, -2 + Math.sin(Math.PI / 2.3) * 12);
   g.stroke();
 }
 
 function drawTank(g) {
-  g.fillStyle = "#6f6f69";
+  // 石巨人：灰岩块 + 裂纹 + 发光眼
+  g.fillStyle = "#7a7a72";
   g.beginPath();
-  g.arc(0, 0, 28, 0, TAU);
+  g.moveTo(-22, 8);
+  g.lineTo(-18, -18);
+  g.lineTo(-6, -26);
+  g.lineTo(10, -24);
+  g.lineTo(22, -14);
+  g.lineTo(24, 6);
+  g.lineTo(12, 20);
+  g.lineTo(-14, 20);
+  g.closePath();
   g.fill();
-  g.fillStyle = "#4d524e";
-  g.fillRect(-18, -6, 36, 18);
+  // 裂纹
+  g.strokeStyle = "rgba(40,40,35,0.6)";
+  g.lineWidth = 2;
+  g.beginPath();
+  g.moveTo(-8, -12); g.lineTo(-2, -4); g.lineTo(-6, 6);
+  g.stroke();
+  // 发光眼
+  g.fillStyle = "#ff8a3d";
+  g.fillRect(-12, -10, 7, 5);
+  g.fillRect(6, -10, 7, 5);
 }
 
 function drawFlyer(g, t) {
-  g.fillStyle = "#3d5169";
+  // 蝙蝠魔：翼展 + 身体 + 红眼
+  const flap = Math.sin(t * 10) * 0.5;
+  g.save();
+  g.translate(0, Math.sin(t * 8) * 3);
+  // 翅膀（扑动）
+  g.fillStyle = "#5a4a72";
   g.beginPath();
-  g.arc(0, Math.sin(t * 8) * 2, 20, 0, TAU);
-  g.fill();
-  g.fillStyle = "#6eb1d8";
+  g.moveTo(-2, -4);
+  g.quadraticCurveTo(-22, -16 - flap * 10, -34, -4 - flap * 12);
+  g.quadraticCurveTo(-20, 6, -4, 4);
+  g.closePath();
   g.beginPath();
-  g.ellipse(-24, -3, 16, 7, Math.sin(t * 12) * 0.4, 0, TAU);
-  g.ellipse(24, -3, 16, 7, -Math.sin(t * 12) * 0.4, 0, TAU);
+  g.moveTo(2, -4);
+  g.quadraticCurveTo(22, -16 - flap * 10, 34, -4 - flap * 12);
+  g.quadraticCurveTo(20, 6, 4, 4);
+  g.closePath();
   g.fill();
+  // 身体
+  g.fillStyle = "#4a3a62";
+  g.beginPath();
+  g.ellipse(0, 0, 12, 14, 0, 0, TAU);
+  g.fill();
+  // 红眼
+  g.fillStyle = "#ff5544";
+  g.fillRect(-6, -5, 4, 4);
+  g.fillRect(2, -5, 4, 4);
+  // 尖耳
+  g.fillStyle = "#4a3a62";
+  g.beginPath();
+  g.moveTo(-6, -12); g.lineTo(-9, -22); g.lineTo(-1, -13); g.closePath();
+  g.moveTo(6, -12); g.lineTo(9, -22); g.lineTo(1, -13); g.closePath();
+  g.fill();
+  g.restore();
 }
 
 function drawBoss(g, e) {
@@ -2150,6 +2320,7 @@ function drawChoiceCards(g, state) {
 
 function drawShop(g, state) {
   const s = SaveSystem.data;
+  const tab = state.shopTab || 0; // 0=成长 1=武器
   g.save();
   g.fillStyle = "rgba(7,12,8,0.88)";
   g.fillRect(0, 0, CONFIG.W, CONFIG.H);
@@ -2165,100 +2336,178 @@ function drawShop(g, state) {
   g.font = "14px Microsoft YaHei, sans-serif";
   g.fillText(`最高波数 ${s.bestWave || 0}`, CONFIG.W / 2, 138);
 
-  // 装备区
-  g.fillStyle = "#c77dff";
-  g.textAlign = "left";
-  g.font = "bold 18px Microsoft YaHei, sans-serif";
-  g.fillText("装备（永久加成）", 40, 180);
-  const equips = [
-    { slot: "bow", name: "古弓", icon: "弓", lv: s.equip.bow, desc: lv => `伤害 +${lv * 18}%  射速 +${lv * 10}%` },
-    { slot: "charm", name: "护符", icon: "符", lv: s.equip.charm, desc: lv => `暴击 +${lv * 8}%` },
-    { slot: "sigil", name: "法阵", icon: "阵", lv: s.equip.sigil, desc: lv => `元素强度 +${lv * 25}%` }
+  // 页签
+  const tabs = [
+    { label: "成长（装备/天赋）", x: 140, w: 210 },
+    { label: "武器皮肤", x: 360, w: 160 }
   ];
-  equips.forEach((eq, i) => {
-    const y = 210 + i * 92;
-    // 卡片底
-    g.fillStyle = "#1a2029";
-    roundRect(g, 28, y, 484, 78, 10);
-    g.fill();
-    g.fillStyle = "#5fc6ff";
-    g.font = "bold 26px Microsoft YaHei, sans-serif";
-    g.fillText(eq.icon, 58, y + 44);
-    g.fillStyle = "#e8eef6";
-    g.font = "bold 18px Microsoft YaHei, sans-serif";
-    g.fillText(eq.name, 96, y + 34);
-    g.fillStyle = "#9aa5b4";
-    g.font = "13px Microsoft YaHei, sans-serif";
-    g.fillText(`Lv.${eq.lv}/3  ${eq.desc(eq.lv)}`, 96, y + 58);
-    // 等级点
-    for (let d = 0; d < 3; d++) {
-      g.fillStyle = d < eq.lv ? "#f7c948" : "rgba(255,255,255,0.14)";
-      g.beginPath();
-      g.arc(470, y + 26 + d * 14, 5, 0, TAU);
-      g.fill();
-    }
-    // 购买按钮
-    const price = SaveSystem.equipPrice(eq.slot);
-    const maxed = eq.lv >= 3;
-    const afford = !maxed && s.gold >= price;
-    if (maxed) {
-      g.fillStyle = "rgba(74,222,128,0.2)";
-      roundRect(g, 388, y + 46, 108, 24, 6); g.fill();
-      g.fillStyle = "#4ade80"; g.font = "13px Microsoft YaHei, sans-serif";
-      g.fillText("已满级", 442, y + 64);
-    } else {
-      g.fillStyle = afford ? "#a865ff" : "rgba(168,101,255,0.3)";
-      roundRect(g, 388, y + 46, 108, 24, 6); g.fill();
-      g.fillStyle = afford ? "#fff" : "#8a94a3"; g.font = "13px Microsoft YaHei, sans-serif";
-      g.fillText(`${price} 金币`, 442, y + 64);
-    }
+  tabs.forEach((tb, i) => {
+    g.fillStyle = i === tab ? "#a865ff" : "rgba(255,255,255,0.1)";
+    roundRect(g, tb.x - tb.w / 2, 156, tb.w, 34, 8); g.fill();
+    g.fillStyle = i === tab ? "#fff" : "#9aa5b4";
+    g.font = "bold 15px Microsoft YaHei, sans-serif";
+    g.fillText(tb.label, tb.x, 180);
   });
 
-  // 天赋区
-  g.fillStyle = "#c77dff";
-  g.font = "bold 18px Microsoft YaHei, sans-serif";
-  g.fillText("天赋（每局生效）", 40, 506);
-  const talents = [
-    { slot: "dmg", name: "力量", icon: "力", lv: s.talents.dmg, desc: lv => `初始伤害 +${lv * 12}%` },
-    { slot: "hp", name: "体质", icon: "体", lv: s.talents.hp, desc: lv => `初始生命 +${lv * 15}` },
-    { slot: "arrow", name: "箭术", icon: "箭", lv: s.talents.arrow, desc: lv => `初始箭数 +${lv}` }
-  ];
-  talents.forEach((t, i) => {
-    const y = 536 + i * 78;
-    g.fillStyle = "#1a2029";
-    roundRect(g, 28, y, 484, 64, 10);
-    g.fill();
-    g.fillStyle = "#5fc6ff";
-    g.font = "bold 24px Microsoft YaHei, sans-serif";
-    g.fillText(t.icon, 58, y + 38);
-    g.fillStyle = "#e8eef6";
-    g.font = "bold 16px Microsoft YaHei, sans-serif";
-    g.fillText(t.name, 96, y + 30);
-    g.fillStyle = "#9aa5b4";
-    g.font = "12px Microsoft YaHei, sans-serif";
-    g.fillText(`Lv.${t.lv}/3  ${t.desc(t.lv)}`, 96, y + 50);
-    const price = SaveSystem.talentPrice(t.slot);
-    const maxed = t.lv >= 3;
-    const afford = !maxed && s.gold >= price;
-    if (maxed) {
-      g.fillStyle = "rgba(74,222,128,0.2)";
-      roundRect(g, 388, y + 20, 108, 24, 6); g.fill();
-      g.fillStyle = "#4ade80"; g.font = "13px Microsoft YaHei, sans-serif";
-      g.fillText("已满级", 442, y + 38);
-    } else {
-      g.fillStyle = afford ? "#a865ff" : "rgba(168,101,255,0.3)";
-      roundRect(g, 388, y + 20, 108, 24, 6); g.fill();
-      g.fillStyle = afford ? "#fff" : "#8a94a3"; g.font = "13px Microsoft YaHei, sans-serif";
-      g.fillText(`${price} 金币`, 442, y + 38);
-    }
-  });
+  if (tab === 0) {
+    // 装备区
+    g.fillStyle = "#c77dff";
+    g.textAlign = "left";
+    g.font = "bold 18px Microsoft YaHei, sans-serif";
+    g.fillText("装备（永久加成）", 40, 222);
+    const equips = [
+      { slot: "bow", name: "古弓", icon: "弓", lv: s.equip.bow, desc: lv => `伤害 +${lv * 18}%  射速 +${lv * 10}%` },
+      { slot: "charm", name: "护符", icon: "符", lv: s.equip.charm, desc: lv => `暴击 +${lv * 8}%` },
+      { slot: "sigil", name: "法阵", icon: "阵", lv: s.equip.sigil, desc: lv => `元素强度 +${lv * 25}%` }
+    ];
+    equips.forEach((eq, i) => {
+      const y = 252 + i * 92;
+      g.fillStyle = "#1a2029";
+      roundRect(g, 28, y, 484, 78, 10);
+      g.fill();
+      g.fillStyle = "#5fc6ff";
+      g.font = "bold 26px Microsoft YaHei, sans-serif";
+      g.fillText(eq.icon, 58, y + 44);
+      g.fillStyle = "#e8eef6";
+      g.font = "bold 18px Microsoft YaHei, sans-serif";
+      g.fillText(eq.name, 96, y + 34);
+      g.fillStyle = "#9aa5b4";
+      g.font = "13px Microsoft YaHei, sans-serif";
+      g.fillText(`Lv.${eq.lv}/3  ${eq.desc(eq.lv)}`, 96, y + 58);
+      for (let d = 0; d < 3; d++) {
+        g.fillStyle = d < eq.lv ? "#f7c948" : "rgba(255,255,255,0.14)";
+        g.beginPath();
+        g.arc(470, y + 26 + d * 14, 5, 0, TAU);
+        g.fill();
+      }
+      const price = SaveSystem.equipPrice(eq.slot);
+      const maxed = eq.lv >= 3;
+      const afford = !maxed && s.gold >= price;
+      if (maxed) {
+        g.fillStyle = "rgba(74,222,128,0.2)";
+        roundRect(g, 388, y + 46, 108, 24, 6); g.fill();
+        g.fillStyle = "#4ade80"; g.font = "13px Microsoft YaHei, sans-serif";
+        g.fillText("已满级", 442, y + 64);
+      } else {
+        g.fillStyle = afford ? "#a865ff" : "rgba(168,101,255,0.3)";
+        roundRect(g, 388, y + 46, 108, 24, 6); g.fill();
+        g.fillStyle = afford ? "#fff" : "#8a94a3"; g.font = "13px Microsoft YaHei, sans-serif";
+        g.fillText(`${price} 金币`, 442, y + 64);
+      }
+    });
+
+    // 天赋区
+    g.fillStyle = "#c77dff";
+    g.font = "bold 18px Microsoft YaHei, sans-serif";
+    g.fillText("天赋（每局生效）", 40, 548);
+    const talents = [
+      { slot: "dmg", name: "力量", icon: "力", lv: s.talents.dmg, desc: lv => `初始伤害 +${lv * 12}%` },
+      { slot: "hp", name: "体质", icon: "体", lv: s.talents.hp, desc: lv => `初始生命 +${lv * 15}` },
+      { slot: "arrow", name: "箭术", icon: "箭", lv: s.talents.arrow, desc: lv => `初始箭数 +${lv}` }
+    ];
+    talents.forEach((t, i) => {
+      const y = 578 + i * 78;
+      g.fillStyle = "#1a2029";
+      roundRect(g, 28, y, 484, 64, 10);
+      g.fill();
+      g.fillStyle = "#5fc6ff";
+      g.font = "bold 24px Microsoft YaHei, sans-serif";
+      g.fillText(t.icon, 58, y + 38);
+      g.fillStyle = "#e8eef6";
+      g.font = "bold 16px Microsoft YaHei, sans-serif";
+      g.fillText(t.name, 96, y + 30);
+      g.fillStyle = "#9aa5b4";
+      g.font = "12px Microsoft YaHei, sans-serif";
+      g.fillText(`Lv.${t.lv}/3  ${t.desc(t.lv)}`, 96, y + 50);
+      const price = SaveSystem.talentPrice(t.slot);
+      const maxed = t.lv >= 3;
+      const afford = !maxed && s.gold >= price;
+      if (maxed) {
+        g.fillStyle = "rgba(74,222,128,0.2)";
+        roundRect(g, 388, y + 20, 108, 24, 6); g.fill();
+        g.fillStyle = "#4ade80"; g.font = "13px Microsoft YaHei, sans-serif";
+        g.fillText("已满级", 442, y + 38);
+      } else {
+        g.fillStyle = afford ? "#a865ff" : "rgba(168,101,255,0.3)";
+        roundRect(g, 388, y + 20, 108, 24, 6); g.fill();
+        g.fillStyle = afford ? "#fff" : "#8a94a3"; g.font = "13px Microsoft YaHei, sans-serif";
+        g.fillText(`${price} 金币`, 442, y + 38);
+      }
+    });
+  } else {
+    // 武器皮肤区（2x2 网格）
+    g.fillStyle = "#f7c948";
+    g.textAlign = "left";
+    g.font = "bold 18px Microsoft YaHei, sans-serif";
+    g.fillText("武器皮肤（不同样式 + 加成）", 40, 222);
+    g.fillStyle = "#8a94a3";
+    g.font = "13px Microsoft YaHei, sans-serif";
+    g.fillText("购买后永久拥有，装备后改变弓的外观并获得加成", 40, 246);
+    WEAPON_SKINS.forEach((w, i) => {
+      const col = i % 2;
+      const row = Math.floor(i / 2);
+      const x = 28 + col * 248;
+      const y = 270 + row * 190;
+      const owned = SaveSystem.data.weaponSkin >= w.id;
+      const current = SaveSystem.data.weaponSkin === w.id;
+      g.fillStyle = current ? "#2a2418" : "#1a2029";
+      roundRect(g, x, y, 232, 170, 12); g.fill();
+      if (current) {
+        g.strokeStyle = "#f7c948";
+        g.lineWidth = 2.5;
+        roundRect(g, x, y, 232, 170, 12); g.stroke();
+      }
+      // 弓预览（简单绘制）
+      g.save();
+      g.translate(x + 116, y + 62);
+      g.strokeStyle = w.color;
+      g.lineWidth = 6;
+      g.shadowBlur = 14;
+      g.shadowColor = w.color;
+      g.beginPath();
+      g.arc(0, 0, 34, -Math.PI / 2.3, Math.PI / 2.3);
+      g.stroke();
+      g.shadowBlur = 0;
+      g.strokeStyle = "rgba(255,255,255,0.4)";
+      g.lineWidth = 2;
+      g.beginPath();
+      g.moveTo(Math.cos(-Math.PI / 2.3) * 34, Math.sin(-Math.PI / 2.3) * 34);
+      g.lineTo(Math.cos(Math.PI / 2.3) * 34, Math.sin(Math.PI / 2.3) * 34);
+      g.stroke();
+      g.restore();
+      g.fillStyle = current ? "#f7c948" : "#e8eef6";
+      g.font = "bold 16px Microsoft YaHei, sans-serif";
+      g.fillText(w.name, x + 12, y + 118);
+      g.fillStyle = "#9aa5b4";
+      g.font = "11px Microsoft YaHei, sans-serif";
+      g.fillText(w.desc, x + 12, y + 140);
+      if (current) {
+        g.fillStyle = "rgba(74,222,128,0.25)";
+        roundRect(g, x + 12, y + 150, 80, 22, 6); g.fill();
+        g.fillStyle = "#4ade80"; g.font = "12px Microsoft YaHei, sans-serif";
+        g.fillText("使用中", x + 52, y + 166);
+      } else if (owned) {
+        g.fillStyle = "rgba(168,101,255,0.25)";
+        roundRect(g, x + 12, y + 150, 80, 22, 6); g.fill();
+        g.fillStyle = "#c77dff"; g.font = "12px Microsoft YaHei, sans-serif";
+        g.fillText("装备", x + 52, y + 166);
+      } else {
+        const afford = s.gold >= w.price;
+        g.fillStyle = afford ? "#f7c948" : "rgba(247,201,72,0.3)";
+        roundRect(g, x + 12, y + 150, 80, 22, 6); g.fill();
+        g.fillStyle = afford ? "#1a1408" : "#8a94a3"; g.font = "12px Microsoft YaHei, sans-serif";
+        g.fillText(`${w.price}💰`, x + 52, y + 166);
+      }
+    });
+  }
 
   // 返回按钮
   g.fillStyle = "rgba(255,255,255,0.12)";
-  roundRect(g, 210, 812, 120, 44, 10); g.fill();
+  roundRect(g, 210, 882, 120, 44, 10); g.fill();
   g.fillStyle = "#e8eef6";
   g.font = "bold 18px Microsoft YaHei, sans-serif";
-  g.fillText("返回", 270, 841);
+  g.textAlign = "center";
+  g.fillText("返回", 270, 912);
   g.restore();
 }
 
@@ -2525,30 +2774,64 @@ function activateAt(x, y) {
     if (x >= CONFIG.W / 2 - 105 && x <= CONFIG.W / 2 + 105 && y >= 376 && y <= 438) game.start();
     else if (x >= CONFIG.W / 2 - 88 && x <= CONFIG.W / 2 + 88 && y >= 462 && y <= 508) game.openShop();
   } else if (game.state === "SHOP") {
-    // 返回按钮
-    if (x >= 210 && x <= 330 && y >= 812 && y <= 856) { game.closeShop(); return; }
-    // 装备购买（3 槽，y: 210/302/394 + 78 高）
-    const eqSlots = ["bow", "charm", "sigil"];
-    for (let i = 0; i < 3; i++) {
-      const by = 210 + i * 92;
-      if (x >= 28 && x <= 512 && y >= by && y <= by + 78) {
-        if (x >= 388 && x <= 496 && y >= by + 46 && y <= by + 70 && SaveSystem.canBuyEquip(eqSlots[i])) {
-          if (SaveSystem.buyEquip(eqSlots[i])) audio.upgrade();
-          return;
-        }
-        return;
-      }
+    const tab = game.shopTab || 0;
+    // 返回按钮（y 882-926）
+    if (x >= 210 && x <= 330 && y >= 882 && y <= 926) { game.closeShop(); return; }
+    // 页签切换
+    if (y >= 156 && y <= 190) {
+      if (x >= 35 && x <= 245) { game.shopTab = 0; return; }
+      if (x >= 280 && x <= 440) { game.shopTab = 1; return; }
     }
-    // 天赋购买（3 槽，y: 536/614/692 + 64 高）
-    const tSlots = ["dmg", "hp", "arrow"];
-    for (let i = 0; i < 3; i++) {
-      const ty = 536 + i * 78;
-      if (x >= 28 && x <= 512 && y >= ty && y <= ty + 64) {
-        if (x >= 388 && x <= 496 && y >= ty + 20 && y <= ty + 44 && SaveSystem.canBuyTalent(tSlots[i])) {
-          if (SaveSystem.buyTalent(tSlots[i])) audio.upgrade();
+    if (tab === 0) {
+      // 装备购买（y: 252/344/436 + 78 高）
+      const eqSlots = ["bow", "charm", "sigil"];
+      for (let i = 0; i < 3; i++) {
+        const by = 252 + i * 92;
+        if (x >= 28 && x <= 512 && y >= by && y <= by + 78) {
+          if (x >= 388 && x <= 496 && y >= by + 46 && y <= by + 70 && SaveSystem.canBuyEquip(eqSlots[i])) {
+            if (SaveSystem.buyEquip(eqSlots[i])) audio.upgrade();
+            return;
+          }
           return;
         }
-        return;
+      }
+      // 天赋购买（y: 578/656/734 + 64 高）
+      const tSlots = ["dmg", "hp", "arrow"];
+      for (let i = 0; i < 3; i++) {
+        const ty = 578 + i * 78;
+        if (x >= 28 && x <= 512 && y >= ty && y <= ty + 64) {
+          if (x >= 388 && x <= 496 && y >= ty + 20 && y <= ty + 44 && SaveSystem.canBuyTalent(tSlots[i])) {
+            if (SaveSystem.buyTalent(tSlots[i])) audio.upgrade();
+            return;
+          }
+          return;
+        }
+      }
+    } else {
+      // 武器皮肤（2x2 网格：28/276 x, 270/460 y，卡 232x170）
+      for (let i = 0; i < WEAPON_SKINS.length; i++) {
+        const col = i % 2;
+        const row = Math.floor(i / 2);
+        const wx = 28 + col * 248;
+        const wy = 270 + row * 190;
+        if (x >= wx && x <= wx + 232 && y >= wy && y <= wy + 170) {
+          // 购买/装备按钮（左下角）
+          if (x >= wx + 12 && x <= wx + 92 && y >= wy + 150 && y <= wy + 172) {
+            if (SaveSystem.data.weaponSkin >= i) {
+              SaveSystem.data.weaponSkin = i;
+              SaveSystem.save();
+              audio.upgrade();
+            } else if (SaveSystem.data.gold >= WEAPON_SKINS[i].price) {
+              SaveSystem.data.gold -= WEAPON_SKINS[i].price;
+              SaveSystem.data.weaponSkin = i;
+              SaveSystem.save();
+              audio.upgrade();
+              game.flashMessage(`获得「${WEAPON_SKINS[i].name}」`);
+            }
+            return;
+          }
+          return;
+        }
       }
     }
   } else if (game.state === "GAME_OVER") {
