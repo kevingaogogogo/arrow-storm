@@ -1264,31 +1264,63 @@ const DemoAI = {
       return;
     }
     if (game.state !== "PLAY") return;
-    // 躲避策略：找最近的威胁（敌人/弹幕），横向避开；同时保持射程内
-    let threat = null, threatD = 999999;
     const px = game.player.x, py = game.player.y;
-    const consider = (x, y) => {
-      const d = (x - px) * (x - px) + (y - py) * (y - py);
-      if (d < threatD && y > py - 420) { threatD = d; threat = { x, y }; }
-    };
-    for (const e of game.enemies.active()) if (!e.dead) consider(e.x, e.y);
-    for (const b of game.bullets.active()) consider(b.x, b.y);
-    if (game.chest) { // 优先吃宝箱
-      if (Math.abs(game.chest.x - px) > 20) {
-        game.input.left = game.chest.x < px ? 1 : 0;
-        game.input.right = game.chest.x > px ? 1 : 0;
-      } else { game.input.left = game.input.right = 0; }
+    const setTarget = x => { game.input.hover = true; game.input.hoverX = Util.clamp(x, 62, CONFIG.W - 62); };
+
+    // 1. 宝箱优先：主动去吃
+    if (game.chest) {
+      setTarget(game.chest.x);
+      if (Math.abs(game.chest.x - px) < 12 && Math.random() < 0.02) this.say("发现宝箱，冲！");
       return;
     }
-    if (!threat) { game.input.left = game.input.right = 0; return; }
-    // 朝远离威胁的方向移动，但别出边界
-    const dir = threat.x > px ? -1 : 1;
-    if (px < 90 && dir < 0) { game.input.right = 0; game.input.left = 0; return; }
-    if (px > CONFIG.W - 90 && dir > 0) { game.input.right = 0; game.input.left = 0; return; }
-    game.input.left = dir < 0 ? 1 : 0;
-    game.input.right = dir > 0 ? 1 : 0;
-    // 偶尔记录移动决策（限频）
-    if (Math.random() < 0.006) this.say(dir < 0 ? "检测到威胁，向左闪避" : "检测到威胁，向右闪避");
+
+    // 2. 危险检测：弹幕优先（致命），敌人次之
+    let danger = null, dangerD = 1e9;
+    for (const b of game.bullets.active()) {
+      const d = Math.hypot(b.x - px, b.y - py);
+      if (d < dangerD && b.y > py - 340 && d < 300) { dangerD = d; danger = { x: b.x, y: b.y }; }
+    }
+    if (!danger) {
+      for (const e of game.enemies.active()) {
+        if (e.dead) continue;
+        const d = Math.hypot(e.x - px, e.y - py);
+        if (d < dangerD && e.y > py - 460) { dangerD = d; danger = { x: e.x, y: e.y, enemy: true }; }
+      }
+    }
+
+    // 3. 目标计算
+    let targetX = CONFIG.W / 2;
+    if (danger) {
+      if (dangerD < 230) {
+        // 急躲：远离威胁；贴边时拉回中心，绝不卡边
+        const away = px + (px - danger.x) * 1.4;
+        targetX = away < 100 || away > CONFIG.W - 100 ? CONFIG.W / 2 : away;
+        if (dangerD < 120) targetX = CONFIG.W / 2;
+        if (Math.random() < 0.01) this.say(danger.x > px ? "弹幕来了，左闪" : "弹幕来了，右闪");
+      } else {
+        // 中距离：横向错开半个身位，保持输出
+        targetX = px + (px - danger.x) * 0.35;
+        targetX = Util.clamp(targetX, 90, CONFIG.W - 90);
+      }
+    } else {
+      // 4. 无危险：主动索敌对齐射击（打怪意识）
+      let bestE = null, bestD = 1e9;
+      for (const e of game.enemies.active()) {
+        if (e.dead) continue;
+        const d = Math.hypot(e.x - px, e.y - py);
+        if (d < bestD && e.y > py - 520) { bestD = d; bestE = e; }
+      }
+      if (bestE) {
+        // 轻微追向敌人正下方，让箭直射命中
+        targetX = bestE.x + (bestE.x - px) * 0.12;
+        if (Math.abs(bestE.x - px) > 140 && Math.random() < 0.008) this.say("锁定目标，对齐射击");
+      } else {
+        // 无敌人：回中心巡航
+        targetX = CONFIG.W / 2 + Math.sin(performance.now() * 0.0004) * 60;
+      }
+    }
+    setTarget(targetX);
+    return;
   },
   render(g) {
     if (!DEMO) return;
