@@ -147,18 +147,35 @@ const THEMES = [
 let themeIndex = 0;
 let themeTrans = 0; // 0=无过渡, 1=切换中
 function getTheme() { return THEMES[themeIndex]; }
-function themeForWave(wave) { return Math.floor((wave - 1) / 5) % THEMES.length; }
-// 场景切换（新波次到达时调用）
+const ROOM_SEQUENCE = ["battle", "battle", "shop", "battle", "elite", "boss"];
+const ROOM_LABEL = {
+  battle: "战斗房",
+  shop: "神秘商人",
+  elite: "精英房",
+  boss: "BOSS房"
+};
+const BOSS_DATA = [
+  { kind: "treant", name: "树精王", title: "BOSS · 树精王", body: "#365a2c", arm: "#4e7a35", eye: "#c9ff72", crown: "#89c85f" },
+  { kind: "scorpion", name: "沙蝎王", title: "BOSS · 沙蝎王", body: "#8a5a24", arm: "#c27a2c", eye: "#ffe08a", crown: "#d9a441" },
+  { kind: "frost", name: "冰霜巨人", title: "BOSS · 冰霜巨人", body: "#d8f4ff", arm: "#7fcfff", eye: "#2458ff", crown: "#f5fbff" },
+  { kind: "demon", name: "炎魔领主", title: "BOSS · 炎魔领主", body: "#6e1d18", arm: "#d94b2d", eye: "#ffd35a", crown: "#ff8a3d" },
+  { kind: "shadow", name: "暗影魔王", title: "BOSS · 暗影魔王", body: "#241736", arm: "#5d3a82", eye: "#6ff0ff", crown: "#a865ff" }
+];
+function themeForChapter(chapter) { return (Math.max(1, chapter) - 1) % THEMES.length; }
+function bossForChapter(chapter) { return BOSS_DATA[themeForChapter(chapter)]; }
+function rebuildThemeDecor(game) {
+  game.decor.length = 0;
+  for (let i = 0; i < 38; i++) game.decor.push(game.makeDecor(Util.rand(0, CONFIG.H), Util.pick(getTheme().decor)));
+}
+// 场景切换：只绑定章节，进新章时调用
 function checkThemeSwitch(game) {
-  const want = themeForWave(game.wave);
-  if (want !== themeIndex && !game.chest) {
+  const want = themeForChapter(game.chapter || 1);
+  if (want !== themeIndex) {
     themeIndex = want;
     themeTrans = 1;
-    game.flashMessage(`进入「${THEMES[want].name}」`);
+    game.flashMessage(`第 ${game.chapter} 章 · ${THEMES[want].name}`);
     audio.upgrade();
-    // 重建场景装饰
-    game.decor.length = 0;
-    for (let i = 0; i < 38; i++) game.decor.push(game.makeDecor(Util.rand(0, CONFIG.H), Util.pick(THEMES[want].decor)));
+    rebuildThemeDecor(game);
   }
 }
 const canvas = document.getElementById("game");
@@ -542,11 +559,13 @@ class Enemy {
     this.baseSpeed = type === "tank" ? 18 : type === "flyer" ? 22 : 0;
     if (this.isElite && this.eliteAffix === "swift") this.baseSpeed = (this.baseSpeed || 26) + 40;
     this.bossRush = 0;
-    // Boss 多样化：按 Boss 序号轮换 3 种（第1个普通 / 第2个重装 / 第3个双头，循环）
-    this.bossKind = this.isBoss ? ["normal", "heavy", "twin"][(Math.floor(wave / 5) - 1 + 9) % 3] : null;
+    // Boss 按章节绑定，不再按波次轮换。
+    this.bossKind = this.isBoss ? bossForChapter((game && game.chapter) || 1).kind : null;
     if (this.isBoss) {
-      if (this.bossKind === "heavy") this.hp = Math.round(this.hp * 1.6);
-      if (this.bossKind === "twin") this.hp = Math.round(this.hp * 0.85);
+      const chapterScale = 1 + Math.floor((((game && game.chapter) || 1) - 1) / 5) * 0.18;
+      if (this.bossKind === "demon") this.hp = Math.round(this.hp * 1.35);
+      if (this.bossKind === "frost") this.hp = Math.round(this.hp * 1.18);
+      this.hp = Math.round(this.hp * chapterScale);
       this.maxHp = this.hp;
     }
   }
@@ -609,7 +628,7 @@ class Enemy {
   update(dt, game) {
     this.t += dt;
     if (this.hitFlash > 0) this.hitFlash -= dt;
-    const scroll = game.flySpeed * dt;
+    const scroll = 0;
     this.y += scroll;
     if (this.fireT > 0) {
       this.fireT -= dt;
@@ -668,15 +687,34 @@ class Enemy {
     this.y = Math.min(this.y + 18 * slow * dt, 190);
     this.shootT -= dt;
     if (this.shootT <= 0) {
-      // 重装 Boss：弹幕更密但间隔更长；双头 Boss：双轮扇形
-      if (this.bossKind === "heavy") {
-        this.shootT = 2.1;
+      if (this.bossKind === "treant") {
+        this.shootT = 1.7;
+        for (let i = -2; i <= 2; i++) {
+          const a = Math.PI / 2 + i * 0.22 + Math.sin(this.t) * 0.08;
+          game.bullets.get(this.x, this.y + 35, Math.cos(a) * 175, Math.sin(a) * 175, 8, 10);
+        }
+        if (Math.random() < 0.38) game.enemies.get("minion", Util.rand(CONFIG.W / 2 - 130, CONFIG.W / 2 + 130), this.y + 85, game.wave);
+      } else if (this.bossKind === "scorpion") {
+        this.shootT = 0.95;
+        const dx = game.player.x - this.x;
+        const dy = game.player.y - this.y;
+        const base = Math.atan2(dy, dx);
+        for (const off of [-0.08, 0.08]) game.bullets.get(this.x, this.y + 45, Math.cos(base + off) * 230, Math.sin(base + off) * 230, 6, 9);
+        if (Math.random() < 0.28) game.bullets.get(this.x + Math.sin(this.t) * 70, this.y + 70, 0, 260, 10, 14);
+      } else if (this.bossKind === "frost") {
+        this.shootT = 1.55;
+        for (let i = -3; i <= 3; i++) {
+          const a = Math.PI / 2 + i * 0.17 + Math.sin(this.t * 0.8) * 0.08;
+          game.bullets.get(this.x, this.y + 35, Math.cos(a) * 145, Math.sin(a) * 145, 9, 9);
+        }
+      } else if (this.bossKind === "demon") {
+        this.shootT = 1.95;
         for (let i = -3; i <= 3; i++) {
           const a = Math.PI / 2 + i * 0.16 + Math.sin(this.t) * 0.1;
-          game.bullets.get(this.x, this.y + 35, Math.cos(a) * 150, Math.sin(a) * 150, 9, 12);
+          game.bullets.get(this.x, this.y + 35, Math.cos(a) * 190, Math.sin(a) * 190, 10, 13);
         }
         if (Math.random() < 0.5) game.enemies.get("tank", Util.rand(CONFIG.W / 2 - 110, CONFIG.W / 2 + 110), this.y + 85, game.wave);
-      } else if (this.bossKind === "twin") {
+      } else {
         this.shootT = 1.1;
         for (let k = 0; k < 2; k++) {
           const ox = k ? 60 : -60;
@@ -685,17 +723,7 @@ class Enemy {
             game.bullets.get(this.x + ox, this.y + 35, Math.cos(a) * 200, Math.sin(a) * 200, 6, 8);
           }
         }
-        if (Math.random() < 0.4) game.enemies.get("minion", Util.rand(CONFIG.W / 2 - 130, CONFIG.W / 2 + 130), this.y + 85, game.wave);
-      } else {
-        this.shootT = 1.6;
-        for (let i = -2; i <= 2; i++) {
-          const a = Math.PI / 2 + i * 0.21 + Math.sin(this.t) * 0.1;
-          game.bullets.get(this.x, this.y + 35, Math.cos(a) * 185, Math.sin(a) * 185, 8, 10);
-        }
-        if (Math.random() < 0.35) {
-          const sx = Util.rand(CONFIG.W / 2 - 130, CONFIG.W / 2 + 130);
-          game.enemies.get("minion", sx, this.y + 85, game.wave);
-        }
+        if (Math.random() < 0.36) this.x = Util.rand(130, CONFIG.W - 130);
       }
       if (Math.random() < 0.18) this.bossRush = 0.45;
     }
@@ -1195,6 +1223,17 @@ function rollChoices() {
   return picks;
 }
 
+function getInRunShopItems() {
+  return [
+    { id: "shop_dmg", name: "伤害训练", icon: "伤", price: 20, desc: "本局伤害 +15%", apply: g => { g.player.damage *= 1.15; } },
+    { id: "shop_rate", name: "疾射药剂", icon: "速", price: 20, desc: "本局射速 +15%", apply: g => { g.player.fireRate = Math.min(6, g.player.fireRate * 1.15); } },
+    { id: "shop_heal", name: "生命药水", icon: "心", price: 20, desc: "回复 50% 生命", apply: g => { g.player.hp = Math.min(g.player.maxHp, g.player.hp + g.player.maxHp * 0.5); } },
+    { id: "shop_shield", name: "护盾符文", icon: "盾", price: 20, desc: "护盾 +1", apply: g => { g.player.shield = (g.player.shield || 0) + 1; } },
+    { id: "shop_arrow", name: "多重箭袋", icon: "箭", price: 20, desc: "箭矢 +1", apply: g => { g.player.arrowCount = Math.min(5, g.player.arrowCount + 1); } },
+    { id: "shop_pierce", name: "穿透刻印", icon: "穿", price: 20, desc: "穿透 +1", apply: g => { g.player.pierce = Math.min(3, g.player.pierce + 1); } }
+  ];
+}
+
 // ── 局外成长存档系统（方案A：localStorage 自动存档）──
 const SAVE_KEY = "arrowStormSave";
 const SAVE_VERSION = 1;
@@ -1317,14 +1356,22 @@ class Game {
     this.distance = 0;
     this.score = 0;
     this.kills = 0;
+    this.chapter = 1;
+    this.roomIndex = 0;
+    this.roomType = ROOM_SEQUENCE[0];
+    this.roomCleared = false;
+    this.roomStarted = false;
+    this.roomTransition = 0;
+    this.settlementBonus = 0;
+    this.settlementBanked = false;
     this.wave = 1;
     this.spawnedWave = 0;
-    this.nextGateM = CONFIG.GATE_EVERY;
     this.flyBonus = 0;
-    this.flySpeed = CONFIG.BASE_FLY_SPEED;
+    this.flySpeed = 0;
     this.boss = null;
     this.gate = null;
     this.chest = null;
+    this.inRunShop = null;
     this.ring = null;
     this.shake = 0;
     this.choices = null;
@@ -1340,7 +1387,7 @@ class Game {
     this._etherealHint = false;
     this.decor.length = 0;
     this.leaves.length = 0;
-    for (let i = 0; i < 38; i++) this.decor.push(this.makeDecor(Util.rand(0, CONFIG.H), Util.pick(getTheme().decor)));
+    rebuildThemeDecor(this);
     for (let i = 0; i < 22; i++) this.leaves.push({ x: Util.rand(0, CONFIG.W), y: Util.rand(0, CONFIG.H), s: Util.rand(0.4, 1.3), a: Util.rand(0, TAU) });
   }
   start() {
@@ -1357,7 +1404,7 @@ class Game {
     this.coins.items.length = 0;
     this.particles.items.length = 0;
     this.resetWorld();
-    this.spawnWave();
+    this.enterRoom(1, 0);
   }
   openShop() { audio.ensure(); this.state = "SHOP"; this.shopTab = 0; }
   closeShop() { this.state = "MENU"; }
@@ -1365,15 +1412,20 @@ class Game {
     if (this.state !== "PLAY") return;
     this.state = "GAME_OVER";
     audio.death();
+    this.bankRunGold();
     this.highScore = Math.max(this.highScore, Math.floor(this.distance));
     localStorage.setItem("arrowStormHighScore", String(this.highScore));
-    // 局外成长：死亡结算金币入账 + 记录最高波数
-    SaveSystem.addGold(this.runGold || 0);
     SaveSystem.data.bestWave = Math.max(SaveSystem.data.bestWave || 0, this.wave);
+    SaveSystem.data.chapter = Math.max(SaveSystem.data.chapter || 1, this.chapter);
     SaveSystem.save();
   }
   getFlySpeed() {
-    return CONFIG.BASE_FLY_SPEED * (1 + this.flyBonus);
+    return 0;
+  }
+  bankRunGold() {
+    if (this.settlementBanked) return;
+    this.settlementBanked = true;
+    SaveSystem.addGold((this.runGold || 0) + (this.settlementBonus || 0));
   }
   update(dt) {
     // 时间缩放：命中顿帧 / 击杀慢镜
@@ -1391,16 +1443,14 @@ class Game {
       if (this.chooseT > 0) this.chooseT -= dt;
       if (this.awakenT > 0) this.awakenT -= dt;
       if (this.bossIntro > 0) this.bossIntro -= dt;
+      if (this.roomTransition > 0) this.roomTransition -= dt;
       if (themeTrans > 0) themeTrans -= dt * 0.8;
       return;
     }
-    this.flySpeed = this.getFlySpeed();
-    this.distance += this.flySpeed * dt / 3;
-    this.wave = Math.floor(this.distance / CONFIG.WAVE_LEN) + 1;
-    checkThemeSwitch(this); // 场景切换检测
-    if (this.wave > this.spawnedWave && !this.boss) this.spawnWave();
-    if (this.distance >= this.nextGateM && !this.gate && !this.choices) this.spawnGate();
+    this.flySpeed = 0;
+    this.distance = (this.chapter - 1) * 600 + this.roomIndex * 100;
     this.updateBackdrop(dt);
+    this.updateInRunShop(dt);
     this.player.update(dt, this);
     for (const a of this.arrows.active()) a.update(dt, this);
     for (const e of this.enemies.active()) e.update(dt, this);
@@ -1409,24 +1459,25 @@ class Game {
     for (const p of this.particles.active()) p.update(dt);
     this.updateGate(dt);
     this.updateChest(dt);
+    this.checkRoomClear();
     if (this.ring) {
       this.ring.r += (this.ring.maxR - this.ring.r) * Math.min(1, dt * 9);
       this.ring.life -= dt;
       if (this.ring.life <= 0) this.ring = null;
     }
     if (this.bossIntro > 0) this.bossIntro -= dt;
+    if (this.roomTransition > 0) this.roomTransition -= dt;
     if (themeTrans > 0) themeTrans -= dt * 0.8;
     if (this.shake > 0) this.shake = Math.max(0, this.shake - dt * 26);
     if (this.messageT > 0) this.messageT -= dt;
   }
   updateBackdrop(dt) {
-    const scroll = this.getFlySpeed() * dt;
+    const scroll = 0;
     for (const d of this.decor) {
-      d.y += scroll * d.layer;
-      if (d.y > CONFIG.H + 70) Object.assign(d, this.makeDecor(Util.rand(-130, -30), Util.pick(getTheme().decor)));
+      d.rot += Math.sin(performance.now() * 0.001 + d.x) * 0.0003;
     }
     for (const l of this.leaves) {
-      l.y += scroll * 0.35 + l.s * 12 * dt;
+      l.y += l.s * 12 * dt;
       l.x += Math.sin(l.a + performance.now() * 0.001) * 12 * dt;
       l.a += dt;
       if (l.y > CONFIG.H + 20) { l.y = -20; l.x = Util.rand(0, CONFIG.W); }
@@ -1444,40 +1495,76 @@ class Game {
       tone: Math.random()
     };
   }
-  spawnWave() {
+  enterRoom(chapter, roomIndex) {
+    this.chapter = chapter;
+    this.roomIndex = roomIndex;
+    this.roomType = ROOM_SEQUENCE[this.roomIndex];
+    this.wave = (chapter - 1) * ROOM_SEQUENCE.length + roomIndex + 1;
     this.spawnedWave = this.wave;
-    if (this.wave % 5 === 0) {
-      this.boss = this.enemies.get("boss", CONFIG.W / 2, -95, this.wave);
+    this.roomCleared = false;
+    this.roomStarted = true;
+    this.roomTransition = 1.2;
+    this.gate = null;
+    this.chest = null;
+    this.boss = null;
+    this.inRunShop = null;
+    this.arrows.items.length = 0;
+    this.bullets.items.length = 0;
+    this.enemies.items.length = 0;
+    this.coins.items.length = 0;
+    this.player.x = CONFIG.W / 2;
+    this.player.y = CONFIG.PLAYER_Y;
+    checkThemeSwitch(this);
+    this.spawnRoom();
+    this.flashMessage(`第 ${this.chapter} 章 · 房间 ${this.roomIndex + 1}/6`);
+  }
+  spawnWave() {
+    this.spawnRoom();
+  }
+  spawnRoom() {
+    this.spawnedWave = this.wave;
+    const difficulty = this.wave;
+    if (this.roomType === "shop") {
+      this.spawnShopRoom();
+      this.spawnGate();
+      return;
+    }
+    if (this.roomType === "boss") {
+      this.boss = this.enemies.get("boss", CONFIG.W / 2, 135, difficulty);
       audio.boss();
-      this.flashMessage(`第 ${this.wave} 波 BOSS`);
+      this.flashMessage(bossForChapter(this.chapter).title);
       // Boss 出场演出：暗幕 + 震屏 + 顶部红光
       this.bossIntro = 1.2;
       this.shake = Math.max(this.shake || 0, 10);
       return;
     }
-    // 难度曲线：敌人数量随波次递增（1波2个 → 后期 4-8 个）
-    const count = Util.randi(2, 2 + Math.min(6, Math.floor(this.wave / 1.5)));
-    // 敌人类型按波次解锁：1波小兵，2波+飞行怪，3波+射手，4波+坦克，6波+更多坦克
+    const baseCount = this.roomType === "elite" ? Util.randi(2, 3) : this.roomIndex === 4 ? Util.randi(3, 5) : Util.randi(2, 4 + Math.min(1, Math.floor(this.chapter / 3)));
     const types = [];
     types.push("minion");
-    if (this.wave >= 2) types.push("flyer");
-    if (this.wave >= 3) types.push("archer");
-    if (this.wave >= 4) types.push("tank");
-    if (this.wave >= 6) types.push("tank", "archer");
-    if (this.wave >= 8) types.push("flyer", "tank");
-    for (let i = 0; i < count; i++) {
-      const y = -80 - i * Util.rand(58, 84);
-      const roadW = Util.roadWidth(Math.max(40, y + CONFIG.H * 0.45));
+    if (difficulty >= 2) types.push("flyer");
+    if (difficulty >= 3) types.push("archer");
+    if (difficulty >= 4) types.push("tank");
+    if (difficulty >= 8) types.push("flyer", "tank", "archer");
+    for (let i = 0; i < baseCount; i++) {
+      const y = Util.rand(145, 455) + (i % 2) * 26;
+      const roadW = Util.roadWidth(y);
       const x = CONFIG.W / 2 + Util.rand(-roadW * 0.36, roadW * 0.36);
-      this.enemies.get(Util.pick(types), x, y, this.wave);
+      const e = this.enemies.get(Util.pick(types), x, y, difficulty);
+      if (this.roomType === "elite") {
+        e.isElite = true;
+        e.eliteAffix = e.eliteAffix || Util.pick(["swift", "huge", "armored", "splitter"]);
+        e.hp = Math.round(e.hp * 1.8);
+        e.maxHp = e.hp;
+        e.r *= e.eliteAffix === "huge" ? 1.25 : 1;
+      }
     }
   }
+  spawnShopRoom() {
+    this.inRunShop = { items: getInRunShopItems(), pulse: 0 };
+    this.flashMessage("神秘商人：局内金币可购买临时强化");
+  }
   spawnGate() {
-    // 升级从「路上穿门」改为「暂停三选一弹卡」
-    this.choices = rollChoices();
-    this.state = "CHOOSE";
-    this.chooseT = 0.35; // 卡片弹出动画
-    this.nextGateM += CONFIG.GATE_EVERY;
+    this.gate = { x: CONFIG.W / 2, y: CONFIG.H * 0.73, r: 48, pulse: 0 };
     audio.upgrade();
   }
   chooseUpgrade(idx) {
@@ -1486,12 +1573,65 @@ class Game {
     this.applyUpgrade(up);
     this.choices = null;
     this.state = "PLAY";
+    this.spawnGate();
   }
   updateGate(dt) {
-    // 原穿门逻辑废弃（升级改为弹卡），保留方法占位避免误调用
     if (!this.gate) return;
-    this.gate.y += this.flySpeed * dt;
-    if (this.gate.y > CONFIG.H + 90) this.gate = null;
+    this.gate.pulse += dt;
+    const dx = this.gate.x - this.player.x;
+    const dy = this.gate.y - this.player.y;
+    const d = Math.max(1, Math.hypot(dx, dy));
+    if (d < 150) {
+      const pull = (1 - d / 150) * 190;
+      this.player.x += dx / d * pull * dt;
+      this.player.y += dy / d * pull * dt;
+    }
+    if (d < this.gate.r + this.player.r) this.advanceRoom();
+  }
+  checkRoomClear() {
+    if (this.roomCleared || this.gate || this.choices || this.roomType === "shop") return;
+    if (this.chest || this.boss) return;
+    const alive = this.enemies.active().some(e => !e.dead);
+    if (alive) return;
+    this.roomCleared = true;
+    if (this.roomType === "battle" || this.roomType === "elite") {
+      this.choices = rollChoices();
+      this.state = "CHOOSE";
+      this.chooseT = 0.35;
+      audio.upgrade();
+    } else if (this.roomType === "boss") {
+      this.spawnGate();
+    }
+  }
+  advanceRoom() {
+    if (!this.gate) return;
+    this.gate = null;
+    this.inRunShop = null;
+    this.arrows.items.length = 0;
+    this.bullets.items.length = 0;
+    if (this.roomIndex >= ROOM_SEQUENCE.length - 1) {
+      this.settlementBonus += 50;
+      const nextChapter = this.chapter + 1;
+      SaveSystem.data.chapter = Math.max(SaveSystem.data.chapter || 1, nextChapter);
+      SaveSystem.save();
+      this.enterRoom(nextChapter, 0);
+    } else {
+      this.enterRoom(this.chapter, this.roomIndex + 1);
+    }
+  }
+  updateInRunShop(dt) {
+    if (this.inRunShop) this.inRunShop.pulse += dt;
+  }
+  buyInRunShop(idx) {
+    if (!this.inRunShop) return false;
+    const item = this.inRunShop.items[idx];
+    if (!item || item.sold || (this.runGold || 0) < item.price) return false;
+    this.runGold -= item.price;
+    item.sold = true;
+    item.apply(this);
+    this.flashMessage(`${item.name}：购买成功`);
+    audio.upgrade();
+    return true;
   }
   applyUpgrade(up) {
     up.apply(this);
@@ -1520,7 +1660,7 @@ class Game {
     for (let i = 0; i < 34; i++) this.particles.get(this.player.x, this.player.y, Util.rand(-160, 160), Util.rand(-200, 60), 0.75, Util.pick(["#f7c948", "#a865ff", "#fff1a5"]), Util.rand(3, 9));
   }
   spawnChest() {
-    this.chest = { x: CONFIG.W / 2, y: -60, r: 34 };
+    this.chest = { x: CONFIG.W / 2, y: CONFIG.H * 0.73, r: 34 };
   }
   updateChest(dt) {
     if (!this.chest) return;
@@ -1601,6 +1741,7 @@ class Game {
     }
     for (const p of this.particles.active()) p.render(g);
     drawUI(g, this);
+    if (this.inRunShop) drawInRunShop(g, this);
     // 三选一卡牌界面（画在最上层）
     if (this.state === "CHOOSE" && this.choices) {
       drawChoiceCards(g, this);
@@ -1666,7 +1807,7 @@ const DemoAI = {
       // 选卡策略：优先稀有度高，同稀有度随机
       let best = 0;
       for (let i = 1; i < game.choices.length; i++) {
-        if (RARITY[game.choices[i].rarity].weight > RARITY[game.choices[best].rarity].weight) best = i;
+        if (RARITY[game.choices[i].rarity].weight < RARITY[game.choices[best].rarity].weight) best = i;
       }
       const picked = game.choices[best];
       this.say(`选择：${picked.name}（${RARITY[picked.rarity].label}）`);
@@ -1686,6 +1827,20 @@ const DemoAI = {
     if (game.chest) {
       setTarget(game.chest.x);
       if (Math.abs(game.chest.x - px) < 12 && Math.random() < 0.02) this.say("发现宝箱，冲！");
+      return;
+    }
+    if (game.inRunShop) {
+      const buyable = game.inRunShop.items.findIndex(item => !item.sold && (game.runGold || 0) >= item.price);
+      if (buyable >= 0 && Math.random() < 0.08) {
+        game.buyInRunShop(buyable);
+        this.say("局内商店购买临时强化");
+      }
+      if (game.gate) setTarget(game.gate.x);
+      return;
+    }
+    if (game.gate) {
+      setTarget(game.gate.x);
+      if (Math.abs(game.gate.x - px) < 18 && Math.random() < 0.02) this.say("清房完成，进入下一房");
       return;
     }
 
@@ -1771,7 +1926,7 @@ function drawWorld(g, state) {
   g.save();
   g.globalAlpha = 0.5;
   for (let i = 0; i < 50; i++) {
-    const y = (i * 42 + (state.distance * 2.2) % 42) - 42;
+    const y = i * 42 - 42;
     g.strokeStyle = i % 2 ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.05)";
     g.beginPath();
     g.moveTo(0, y);
@@ -1810,9 +1965,9 @@ function drawWorld(g, state) {
   g.save();
   g.globalAlpha = 0.08;
   for (let i = 0; i < 6; i++) {
-    const ly = ((i * 170 + state.distance * 3.2) % (CONFIG.H + 200)) - 100;
+    const ly = i * 170 - 60 + Math.sin(performance.now() * 0.0008 + i) * 18;
     const lw = Util.roadWidth(ly) * 0.55;
-    const lx = CONFIG.W / 2 + Math.sin(i * 2.4 + state.distance * 0.004) * 40;
+    const lx = CONFIG.W / 2 + Math.sin(i * 2.4 + performance.now() * 0.0005) * 40;
     g.fillStyle = th.light[i % 2];
     g.beginPath();
     g.ellipse(lx, ly, lw * 0.32, 16 + ly / CONFIG.H * 14, 0, 0, TAU);
@@ -1832,6 +1987,18 @@ function drawWorld(g, state) {
     g.font = "bold 26px Microsoft YaHei, sans-serif";
     g.textAlign = "center";
     g.fillText(`— ${th.name} —`, CONFIG.W / 2, CONFIG.H * 0.42 + 6);
+    g.restore();
+  }
+  if (state.roomTransition > 0) {
+    const a = Util.clamp(state.roomTransition / 1.2, 0, 1);
+    g.save();
+    g.globalAlpha = a;
+    g.fillStyle = "rgba(0,0,0,0.42)";
+    g.fillRect(0, CONFIG.H * 0.33 - 46, CONFIG.W, 92);
+    g.fillStyle = "#fff0c4";
+    g.font = "bold 24px Microsoft YaHei, sans-serif";
+    g.textAlign = "center";
+    g.fillText(`第 ${state.chapter} 章 · 房间 ${state.roomIndex + 1}/6 · ${ROOM_LABEL[state.roomType]}`, CONFIG.W / 2, CONFIG.H * 0.33 + 8);
     g.restore();
   }
 }
@@ -2141,44 +2308,50 @@ function drawFlyer(g, t) {
 }
 
 function drawBoss(g, e) {
-  // 三种 Boss 配色：普通=红紫，重装=深蓝，双头=双色
-  const pal = e.bossKind === "heavy"
-    ? { body: "#26304c", arm: "#3b4a7b", eye: "#5fc6ff", crown: "#9fb8ff" }
-    : e.bossKind === "twin"
-    ? { body: "#4c2632", arm: "#7b3340", eye: "#ffd56a", crown: "#f1c45f" }
-    : { body: "#3c2440", arm: "#6a2f6a", eye: "#ff9b35", crown: "#f1c45f" };
-  g.fillStyle = pal.body;
-  g.beginPath();
-  g.arc(0, 0, 72, 0, TAU);
-  g.fill();
-  g.fillStyle = pal.arm;
-  g.beginPath();
-  g.moveTo(-68, -16);
-  g.lineTo(-112, 20);
-  g.lineTo(-50, 32);
-  g.closePath();
-  g.moveTo(68, -16);
-  g.lineTo(112, 20);
-  g.lineTo(50, 32);
-  g.closePath();
-  g.fill();
-  g.fillStyle = pal.crown;
-  g.beginPath();
-  g.moveTo(-26, -46);
-  g.lineTo(-10, -78);
-  g.lineTo(2, -42);
-  g.lineTo(18, -78);
-  g.lineTo(28, -44);
-  g.closePath();
-  g.fill();
-  g.fillStyle = pal.eye;
-  g.fillRect(-32, -13, 18, 9);
-  g.fillRect(14, -13, 18, 9);
-  // 双头 Boss：第二对眼睛
-  if (e.bossKind === "twin") {
-    g.fillRect(-32, -34, 18, 9);
-    g.fillRect(14, -34, 18, 9);
+  const pal = BOSS_DATA.find(b => b.kind === e.bossKind) || BOSS_DATA[0];
+  if (e.bossKind === "treant") {
+    g.fillStyle = "#4b2f1d";
+    roundRect(g, -38, -62, 76, 124, 22); g.fill();
+    g.strokeStyle = "#2c5a2d"; g.lineWidth = 16; g.lineCap = "round";
+    g.beginPath(); g.moveTo(-46, -18); g.quadraticCurveTo(-92, -50, -112, 18); g.moveTo(46, -18); g.quadraticCurveTo(92, -50, 112, 18); g.stroke();
+    g.fillStyle = "#5f9d45";
+    for (const p of [[-28,-78],[0,-92],[28,-78],[-12,-66],[16,-64]]) { g.beginPath(); g.arc(p[0], p[1], 20, 0, TAU); g.fill(); }
+  } else if (e.bossKind === "scorpion") {
+    g.fillStyle = pal.body;
+    g.beginPath(); g.ellipse(0, 6, 58, 70, 0, 0, TAU); g.fill();
+    g.fillStyle = pal.arm;
+    g.beginPath(); g.moveTo(-48,-16); g.lineTo(-118,-54); g.lineTo(-92,12); g.closePath(); g.moveTo(48,-16); g.lineTo(118,-54); g.lineTo(92,12); g.closePath(); g.fill();
+    g.strokeStyle = "#c88a38"; g.lineWidth = 14; g.lineCap = "round";
+    g.beginPath(); g.moveTo(0,-58); g.quadraticCurveTo(48,-116, 12,-150); g.stroke();
+    g.fillStyle = "#ffe08a"; g.beginPath(); g.moveTo(12,-160); g.lineTo(32,-128); g.lineTo(-2,-134); g.closePath(); g.fill();
+  } else if (e.bossKind === "frost") {
+    g.fillStyle = pal.body;
+    g.beginPath(); g.moveTo(-48,58); g.lineTo(-60,-20); g.lineTo(-22,-74); g.lineTo(28,-70); g.lineTo(62,-16); g.lineTo(46,58); g.closePath(); g.fill();
+    g.fillStyle = "#7fcfff";
+    g.beginPath(); g.moveTo(-72,-8); g.lineTo(-118,28); g.lineTo(-68,38); g.closePath(); g.moveTo(72,-8); g.lineTo(118,28); g.lineTo(68,38); g.closePath(); g.fill();
+    g.fillStyle = "#f5fbff";
+    for (const x of [-34, 0, 34]) { g.beginPath(); g.moveTo(x,-72); g.lineTo(x+10,-106); g.lineTo(x+22,-72); g.closePath(); g.fill(); }
+  } else if (e.bossKind === "demon") {
+    g.fillStyle = pal.body;
+    g.beginPath(); g.arc(0, 4, 70, 0, TAU); g.fill();
+    g.fillStyle = pal.arm;
+    g.beginPath(); g.moveTo(-58,-12); g.lineTo(-108,44); g.lineTo(-42,38); g.closePath(); g.moveTo(58,-12); g.lineTo(108,44); g.lineTo(42,38); g.closePath(); g.fill();
+    g.fillStyle = "#ff8a3d";
+    g.beginPath(); g.moveTo(-36,-46); g.lineTo(-66,-92); g.lineTo(-14,-58); g.closePath(); g.moveTo(36,-46); g.lineTo(66,-92); g.lineTo(14,-58); g.closePath(); g.fill();
+    g.strokeStyle = "rgba(255,150,60,0.75)"; g.lineWidth = 5; g.beginPath(); g.arc(0, 4, 84, 0.2, TAU - 0.2); g.stroke();
+  } else {
+    g.fillStyle = "rgba(36,23,54,0.88)";
+    g.beginPath(); g.ellipse(0, 8, 66, 84, 0, 0, TAU); g.fill();
+    g.fillStyle = "rgba(93,58,130,0.7)";
+    g.beginPath(); g.moveTo(-40,-30); g.quadraticCurveTo(-104,0,-82,78); g.lineTo(-22,46); g.closePath(); g.moveTo(40,-30); g.quadraticCurveTo(104,0,82,78); g.lineTo(22,46); g.closePath(); g.fill();
+    g.fillStyle = "#120d20"; g.beginPath(); g.arc(0, 8, 50, 0, TAU); g.fill();
   }
+  g.fillStyle = pal.eye;
+  g.shadowBlur = 14;
+  g.shadowColor = pal.eye;
+  g.fillRect(-30, -14, 18, 9);
+  g.fillRect(12, -14, 18, 9);
+  g.shadowBlur = 0;
 }
 
 function drawSmallHp(g, x, y, w, p) {
@@ -2191,33 +2364,32 @@ function drawSmallHp(g, x, y, w, p) {
 }
 
 function drawGate(g, gate) {
-  for (const side of [gate.left, gate.right]) {
-    const y = gate.y;
-    const s = Util.worldScale(y);
-    drawShadow(g, side.x, y + 36 * s, 50 * s, 13 * s, 0.3);
-    g.save();
-    g.translate(side.x, y);
-    g.scale(s, s);
-    g.fillStyle = "#5b351b";
-    g.fillRect(-42, 34, 9, 52);
-    g.fillRect(33, 34, 9, 52);
-    g.fillStyle = CONFIG.COLORS.wood;
-    g.strokeStyle = "#422614";
-    g.lineWidth = 4;
-    roundRect(g, -68, -34, 136, 74, 8);
-    g.fill();
-    g.stroke();
-    g.fillStyle = "#c99651";
-    g.fillRect(-58, -20, 116, 8);
-    g.fillRect(-58, 8, 116, 8);
-    g.fillStyle = "#fff0c4";
-    g.textAlign = "center";
-    g.font = "bold 22px Microsoft YaHei, sans-serif";
-    g.fillText(side.up.name, 0, -3);
-    g.font = "14px Microsoft YaHei, sans-serif";
-    wrapText(g, side.up.desc, 0, 24, 112, 16);
-    g.restore();
-  }
+  const pulse = 0.5 + Math.sin((gate.pulse || 0) * 5) * 0.5;
+  const r = gate.r + pulse * 8;
+  drawShadow(g, gate.x, gate.y + 38, 74, 18, 0.32);
+  g.save();
+  g.translate(gate.x, gate.y);
+  g.shadowBlur = 28;
+  g.shadowColor = "#f7c948";
+  const grad = g.createRadialGradient(0, 0, 8, 0, 0, r);
+  grad.addColorStop(0, "rgba(255,255,220,0.96)");
+  grad.addColorStop(0.45, "rgba(247,201,72,0.65)");
+  grad.addColorStop(1, "rgba(168,101,255,0.05)");
+  g.fillStyle = grad;
+  g.beginPath();
+  g.ellipse(0, 0, r * 0.72, r, 0, 0, TAU);
+  g.fill();
+  g.shadowBlur = 0;
+  g.strokeStyle = "#fff1a8";
+  g.lineWidth = 5;
+  g.beginPath();
+  g.ellipse(0, 0, r * 0.72, r, 0, 0, TAU);
+  g.stroke();
+  g.fillStyle = "#fff0c4";
+  g.font = "bold 16px Microsoft YaHei, sans-serif";
+  g.textAlign = "center";
+  g.fillText("传送门", 0, r + 24);
+  g.restore();
 }
 
 function drawChoiceCards(g, state) {
@@ -2314,6 +2486,51 @@ function drawChoiceCards(g, state) {
   g.fillStyle = "#8a94a3";
   g.font = "14px Microsoft YaHei, sans-serif";
   g.fillText("点击卡片选择 · 键盘 1/2/3", CONFIG.W / 2, y + cardH + 40);
+  g.restore();
+}
+
+function drawInRunShop(g, state) {
+  if (!state.inRunShop) return;
+  const items = state.inRunShop.items || [];
+  g.save();
+  g.fillStyle = "rgba(9,13,16,0.78)";
+  roundRect(g, 24, 132, 492, 330, 10); g.fill();
+  g.strokeStyle = "rgba(247,201,72,0.42)";
+  g.lineWidth = 2;
+  roundRect(g, 24, 132, 492, 330, 10); g.stroke();
+  g.textAlign = "center";
+  g.fillStyle = "#fff0c4";
+  g.font = "bold 28px Microsoft YaHei, sans-serif";
+  g.fillText("神秘商人", CONFIG.W / 2, 174);
+  g.fillStyle = "#f7c948";
+  g.font = "bold 18px Microsoft YaHei, sans-serif";
+  g.fillText(`局内金币 ${state.runGold || 0}`, CONFIG.W / 2, 202);
+  const w = 146, h = 96, gap = 14;
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    const col = i % 3;
+    const row = Math.floor(i / 3);
+    const x = 48 + col * (w + gap);
+    const y = 226 + row * 112;
+    const afford = (state.runGold || 0) >= item.price;
+    g.fillStyle = item.sold ? "rgba(255,255,255,0.08)" : afford ? "rgba(247,201,72,0.16)" : "rgba(255,255,255,0.08)";
+    roundRect(g, x, y, w, h, 8); g.fill();
+    g.strokeStyle = item.sold ? "rgba(255,255,255,0.14)" : afford ? "rgba(247,201,72,0.55)" : "rgba(255,255,255,0.18)";
+    g.lineWidth = 2;
+    roundRect(g, x, y, w, h, 8); g.stroke();
+    g.fillStyle = item.sold ? "#8a94a3" : "#f7c948";
+    g.font = "bold 24px Microsoft YaHei, sans-serif";
+    g.fillText(item.icon, x + w / 2, y + 32);
+    g.fillStyle = "#f5ecd9";
+    g.font = "bold 15px Microsoft YaHei, sans-serif";
+    g.fillText(item.name, x + w / 2, y + 55);
+    g.fillStyle = item.sold ? "#8a94a3" : afford ? "#f7c948" : "#c2a06a";
+    g.font = "13px Microsoft YaHei, sans-serif";
+    g.fillText(item.sold ? "已购买" : `${item.price} 金币`, x + w / 2, y + 78);
+  }
+  g.fillStyle = "#b9c2d0";
+  g.font = "13px Microsoft YaHei, sans-serif";
+  g.fillText("购买后穿过下方传送门继续闯关", CONFIG.W / 2, 444);
   g.restore();
 }
 
@@ -2583,9 +2800,9 @@ function drawHud(g, state) {
   roundRect(g, 324, 16, 202, 92, 8); g.fill();
   g.fillStyle = CONFIG.COLORS.ui;
   g.font = "bold 18px Microsoft YaHei, sans-serif";
-  g.fillText(`${Math.floor(state.distance)}m  ${state.score}分`, 510, 42);
+  g.fillText(`第 ${state.chapter} 章  ${state.score}分`, 510, 42);
   g.font = "15px Microsoft YaHei, sans-serif";
-  g.fillText(`第 ${state.wave} 波  击杀 ${state.kills}`, 510, 66);
+  g.fillText(`房间 ${state.roomIndex + 1}/6 · ${ROOM_LABEL[state.roomType]}  击杀 ${state.kills}`, 510, 66);
   g.fillText(`御剑 ${state.player.swords.length}/3${state.player.shield > 0 ? `  盾${state.player.shield}` : ""}`, 510, 90);
   g.fillStyle = "#f7c948";
   g.fillText(`💰${state.runGold || 0}`, 96, 108);
@@ -2601,7 +2818,7 @@ function drawHud(g, state) {
     g.textAlign = "center";
     g.fillStyle = "#fff0d0";
     g.font = "bold 16px Microsoft YaHei, sans-serif";
-    g.fillText("BOSS", CONFIG.W / 2, 81);
+    g.fillText(bossForChapter(state.chapter).name, CONFIG.W / 2, 81);
   }
   g.restore();
 }
@@ -2637,7 +2854,7 @@ function drawMenu(g, state) {
   g.shadowBlur = 6 + 6 * pulse;
   g.fillStyle = "#d4c6af";
   g.font = "20px Microsoft YaHei, sans-serif";
-  g.fillText("v2.1  自动飞行 · 三选一强化 · 流派觉醒", CONFIG.W / 2, 292);
+  g.fillText("v3.0  房间闯关 · 局内商店 · 专属Boss", CONFIG.W / 2, 292);
   g.shadowBlur = 0;
   drawButton(g, CONFIG.W / 2 - 105, 376, 210, 62, "开始");
   // 商店按钮 + 金币
@@ -2651,9 +2868,9 @@ function drawMenu(g, state) {
   g.fillText(`商店 · ${SaveSystem.data.gold} 💰`, CONFIG.W / 2, 492);
   g.fillStyle = "#f1dfbf";
   g.font = "18px Microsoft YaHei, sans-serif";
-  g.fillText(`最高分：${state.highScore}m`, CONFIG.W / 2, 556);
+  g.fillText(`最高进度：第 ${SaveSystem.data.chapter || 1} 章`, CONFIG.W / 2, 556);
   g.font = "16px Microsoft YaHei, sans-serif";
-  const lines = ["←→ / AD 控制横移，触摸拖拽控制角色 X", "每 240m 暂停弹出 3 张强化卡（白/蓝/紫/金稀有度）", "连选 3 个同系强化触发流派觉醒", "每 5 波 Boss，击杀后穿过金色宝箱拿大奖励"];
+  const lines = ["←→ / AD 控制横移，触摸拖拽控制角色 X", "每章 6 房：战斗 · 战斗 · 商店 · 战斗 · 精英 · BOSS", "清房后三选一强化，商店房消费局内金币", "击杀章节 Boss 后切换场景并进入下一章"];
   lines.forEach((line, i) => g.fillText(line, CONFIG.W / 2, 626 + i * 34));
   g.fillStyle = "#a9977d";
   g.font = "14px Microsoft YaHei, sans-serif";
@@ -2668,15 +2885,15 @@ function drawGameOver(g, state) {
   g.textAlign = "center";
   g.fillStyle = "#ffe3b0";
   g.font = "bold 52px Microsoft YaHei, sans-serif";
-  g.fillText("飞行终止", CONFIG.W / 2, 260);
+  g.fillText("闯关失败", CONFIG.W / 2, 260);
   g.fillStyle = "#f1dfbf";
   g.font = "22px Microsoft YaHei, sans-serif";
-  g.fillText(`距离 ${Math.floor(state.distance)}m`, CONFIG.W / 2, 340);
-  g.fillText(`击杀 ${state.kills}  第 ${state.wave} 波`, CONFIG.W / 2, 380);
+  g.fillText(`进度 第 ${state.chapter} 章 · 房间 ${state.roomIndex + 1}/6`, CONFIG.W / 2, 340);
+  g.fillText(`击杀 ${state.kills}  评分 ${state.score}`, CONFIG.W / 2, 380);
   g.fillStyle = "#f7c948";
-  g.fillText(`本局金币 +${state.runGold || 0}`, CONFIG.W / 2, 420);
+  g.fillText(`入账金币 +${(state.runGold || 0) + (state.settlementBonus || 0)}`, CONFIG.W / 2, 420);
   g.fillStyle = "#f1dfbf";
-  g.fillText(`最高分 ${state.highScore}m`, CONFIG.W / 2, 460);
+  g.fillText(`局内剩余 ${state.runGold || 0} · 章节奖励 ${state.settlementBonus || 0}`, CONFIG.W / 2, 460);
   drawButton(g, CONFIG.W / 2 - 105, 504, 210, 62, "重开");
   // 去商店按钮（金币引导：花掉本局赚的金币）
   g.fillStyle = "rgba(247,201,72,0.18)";
@@ -2769,6 +2986,19 @@ function activateAt(x, y) {
       }
     }
     return;
+  }
+  if (game.state === "PLAY" && game.inRunShop) {
+    const w = 146, h = 96, gap = 14;
+    for (let i = 0; i < game.inRunShop.items.length; i++) {
+      const col = i % 3;
+      const row = Math.floor(i / 3);
+      const bx = 48 + col * (w + gap);
+      const by = 226 + row * 112;
+      if (x >= bx && x <= bx + w && y >= by && y <= by + h) {
+        game.buyInRunShop(i);
+        return;
+      }
+    }
   }
   if (game.state === "MENU") {
     if (x >= CONFIG.W / 2 - 105 && x <= CONFIG.W / 2 + 105 && y >= 376 && y <= 438) game.start();
