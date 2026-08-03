@@ -565,7 +565,18 @@ class Arrow {
     } else if (this.ice && Math.random() < 0.45) {
       game.particles.get(this.x, this.y, Util.rand(-12, 12), Util.rand(-12, 12), 0.35, Util.pick(["#9fe8ff", "#5fc6ff", "#d6f5ff"]), Util.rand(2, 3.5));
     }
-    if (this.y < -80 || this.travel > this.range) this.active = false;
+    if (this.y < -80 || this.travel > this.range) {
+      // 弹射墙：撞到房间顶部边缘反弹（不消失）
+      if (this.bounce > 0 && this.y < -80 && this.vy < 0 && this.travel < this.range) {
+        this.bounce--;
+        this.y = -78;
+        this.vy = Math.abs(this.vy) * 0.9;
+        this.vx *= 0.95;
+        for (let i = 0; i < 6; i++) game.particles.get(this.x, 0, Util.rand(-20, 20), Util.rand(20, 60), 0.3, "#c77dff", Util.rand(2, 4));
+      } else {
+        this.active = false;
+      }
+    }
     for (const e of game.enemies.active()) {
       if (!this.active || e.dead || this.hitIds.has(e.id)) continue;
       if (Util.circleHit(this, e)) {
@@ -573,8 +584,13 @@ class Arrow {
         // 命中顿帧：每次命中微停 30ms，营造打击重量
         game.hitStop = Math.max(game.hitStop || 0, 0.03);
         const crit = Math.random() < this.critChance;
-        const dmg = this.damage * (crit ? 2 : 1);
+        const dmg = this.damage * (crit ? (this.critDmg || 2) : 1);
         e.takeDamage(dmg, crit, game, this.fire, this.ice);
+        // 毒箭：无视护甲 DOT（4/秒 3 秒）
+        if (this.poison && !e.poisonT) {
+          e.poisonT = 3;
+          e.poisonDps = 4;
+        }
         // 吸血：命中概率回血（防多箭+追踪无脑站桩）
         if (this.lifesteal > 0 && Math.random() < 0.35) {
           game.player.hp = Math.min(game.player.maxHp, game.player.hp + this.lifesteal);
@@ -745,6 +761,8 @@ class Enemy {
     this.shootT = Util.rand(0.4, 1.8);
     this.fireT = 0;
     this.iceT = 0;
+    this.poisonT = 0;
+    this.poisonDps = 0;
     this.drift = Util.rand(-1, 1);
     this.isBoss = type === "boss";
     this.hitFlash = 0;
@@ -823,7 +841,9 @@ class Enemy {
     }
     // 金币掉落：生成金币实体（磁吸拾取），精英怪 5 倍
     const base = this.isBoss ? 40 : { minion: 2, archer: 3, tank: 5, flyer: 3 }[this.type] || 2;
-    const total = Math.round(base * (1 + game.wave * 0.03) * (this.isElite ? 5 : 1));
+    // 招财天赋：金币获取加成
+    const goldMult = (game.player.heroGoldMult || 1);
+    const total = Math.round(base * (1 + game.wave * 0.03) * (this.isElite ? 5 : 1) * goldMult);
     // 拆成 1-3 枚金币掉落（更有捡钱感）
     const nCoins = this.isBoss ? 5 : this.isElite ? 3 : Util.randi(1, 2);
     for (let i = 0; i < nCoins; i++) {
@@ -853,6 +873,13 @@ class Enemy {
       // 灼烧：精英/Boss 减半（元素流不是无脑最优）
       const dotMul = (this.isElite || this.isBoss) ? 0.5 : 1;
       this.takeDot(8 * (game.player.elemBoost || 1) * (game.player.burnMult || 1) * dotMul * dt, game, "#e54d3c");
+    }
+    // 毒 DOT：无视护甲（剧毒箭）
+    if (this.poisonT > 0) {
+      this.poisonT -= dt;
+      this.hp -= (this.poisonDps || 4) * dt;
+      if (Math.random() < 0.1) game.particles.get(this.x, this.y - this.r * 0.5, Util.rand(-12, 12), Util.rand(-30, -5), 0.4, "#8aff5c", Util.rand(2, 3.5));
+      if (this.hp <= 0) this.kill(game);
     }
     if (this.iceT > 0) this.iceT -= dt;
     const slow = this.iceT > 0 ? 0.5 / (game.player.slowMult || 1) : 1;
@@ -1182,6 +1209,20 @@ class Sword {
         // 飞到目标：命中结算
         const dmg = 15 * (game.player.summonBoost || 1);
         this.target.takeDamage(game.player.spirit ? dmg * 2 : dmg, false, game, false, false);
+        // 弹射剑：命中后弹射至附近其他敌人
+        if (game.player.ricochet > 0) {
+          let next = null, nd = 1e9;
+          for (const e of game.enemies.active()) {
+            if (e === this.target || e.dead) continue;
+            const dd = Math.hypot(e.x - this.target.x, e.y - this.target.y);
+            if (dd < 260 && dd < nd) { next = e; nd = dd; }
+          }
+          if (next) {
+            this.target = next;
+            game.player.ricochet--;
+            return;
+          }
+        }
         this.target = null;
         this.slashT = 0.12;
         audio.sword();
@@ -1284,6 +1325,14 @@ class Player {
     this.orb = 0;
     this.homing = false;
     this.pierceAll = false;
+    this.bounce = 0;        // 弹射墙（箭撞墙反弹）
+    this.poison = false;    // 毒箭（DOT）
+    this.critDmg = 2;       // 暴击伤害倍数
+    this.dodge = 0;         // 闪避率
+    this.thorns = 0;        // 荆棘反伤
+    this.berserk = 0;       // 狂暴（低血加伤）
+    this.swift = 0;         // 迅捷（箭速）
+    this.ricochet = 0;      // 弹射敌人数
     this.swords = [];
     this.inv = 0;
     this.pickedUpgrades = [];
@@ -1296,6 +1345,11 @@ class Player {
   canBeHit() { return this.inv <= 0; }
   hurt(dmg, game, kx, ky) {
     if (!this.canBeHit()) return;
+    // 闪避：概率完全躲开（闪避天赋）
+    if (this.dodge > 0 && Math.random() < this.dodge) {
+      for (let i = 0; i < 6; i++) game.particles.get(this.x, this.y, Util.rand(-30, 30), Util.rand(-40, 20), 0.4, "#8affc1", Util.rand(2, 4));
+      return;
+    }
     // 护盾抵挡
     if (this.shield > 0) {
       this.shield -= 1;
@@ -1303,6 +1357,17 @@ class Player {
       return;
     }
     this.hp -= dmg;
+    // 荆棘反伤（受击反弹伤害给所有近身敌人）
+    if (this.thorns > 0) {
+      for (const e of game.enemies.active()) {
+        if (e.dead) continue;
+        const d = Math.hypot(e.x - this.x, e.y - this.y);
+        if (d < 90) {
+          e.takeDamage(this.thorns * 6, false, game, false, false);
+          game.particles.get(e.x, e.y - e.r, 0, -40, 0.4, "#8aff5c", 4);
+        }
+      }
+    }
     game.totalTank = (game.totalTank || 0) + Math.max(0, Math.round(dmg || 0));
     this.inv = CONFIG.INVINCIBLE_TIME;
     this.knockX += kx;
@@ -1521,7 +1586,23 @@ const UPGRADES = [
   { id: "shield", name: "护盾", icon: "盾", rarity: "epic", faction: "surv", desc: "获得护盾，抵挡一次伤害", max: 3, has: g => g.player.shield >= 3, apply: g => { g.player.shield = (g.player.shield || 0) + 1; } },
   // ── 机制型（弓箭传说式）──
   { id: "lifesteal", name: "吸血箭", icon: "吸", rarity: "epic", faction: "shot", desc: "命中 35% 概率回复 1.5 生命", max: 2, has: g => g.player.lifesteal >= 2, apply: g => { g.player.lifesteal = (g.player.lifesteal || 0) + 1.5; } },
-  { id: "orb", name: "环绕火球", icon: "环", rarity: "legendary", faction: "elem", desc: "火球环绕，触碰敌人灼烧", max: 1, has: g => g.player.orb > 0, apply: g => { g.player.orb = (g.player.orb || 0) + 1; } }
+  { id: "orb", name: "环绕火球", icon: "环", rarity: "legendary", faction: "elem", desc: "火球环绕，触碰敌人灼烧", max: 1, has: g => g.player.orb > 0, apply: g => { g.player.orb = (g.player.orb || 0) + 1; } },
+  // ── 弹道系新增（v3.10）──
+  { id: "bounce", name: "弹射墙", icon: "弹", rarity: "rare", faction: "shot", desc: "箭撞到房间边缘反弹 1 次", max: 2, has: g => g.player.bounce >= 2, apply: g => { g.player.bounce = (g.player.bounce || 0) + 1; } },
+  { id: "critDmg", name: "致命一击", icon: "杀", rarity: "epic", faction: "shot", desc: "暴击伤害 2 倍 → 2.6 倍", max: 2, has: g => g.player.critDmg >= 2.6, apply: g => { g.player.critDmg = Math.min(2.6, g.player.critDmg + 0.3); } },
+  { id: "swift", name: "迅捷箭", icon: "迅", rarity: "common", faction: "shot", desc: "箭速 +15%（更快命中）", max: 2, has: g => g.player.swift >= 2, apply: g => { g.player.swift = (g.player.swift || 0) + 1; } },
+  // ── 元素系新增 ──
+  { id: "poison", name: "剧毒箭", icon: "毒", rarity: "epic", faction: "elem", desc: "命中中毒 4/秒 3 秒（无视护甲）", max: 1, has: g => g.player.poison, apply: g => { g.player.poison = true; } },
+  { id: "chain", name: "连锁闪电", icon: "链", rarity: "legendary", faction: "elem", desc: "雷电弹射 +1 次（追加伤害）", max: 2, has: g => g.player.volt >= 3, apply: g => { g.player.volt = (g.player.volt || 0) + 1; } },
+  { id: "elemMaster", name: "元素大师", icon: "元", rarity: "rare", faction: "elem", desc: "元素强度 +30%", max: 3, has: g => g.player.elemBoost >= 2.2, apply: g => { g.player.elemBoost = Math.min(3, (g.player.elemBoost || 1) + 0.3); } },
+  // ── 召唤系新增 ──
+  { id: "ricochet", name: "弹射剑", icon: "回", rarity: "epic", faction: "summon", desc: "御剑命中后弹射至附近敌人", max: 2, has: g => g.player.ricochet >= 2, apply: g => { g.player.ricochet = (g.player.ricochet || 0) + 1; } },
+  { id: "summonDmg", name: "御剑之力", icon: "御", rarity: "rare", faction: "summon", desc: "御剑伤害 +25%", max: 3, has: g => g.player.summonBoost >= 1.75, apply: g => { g.player.summonBoost = Math.min(2.5, (g.player.summonBoost || 1) + 0.25); } },
+  { id: "phantom", name: "幻影剑", icon: "幻", rarity: "legendary", faction: "summon", desc: "御剑 +1（第 4 把，剑灵羁绊）", max: 1, has: g => g.player.phantom, apply: g => { g.player.phantom = true; if (g.player.swords.length < 4) g.player.swords.push(new Sword(g.player.swords.length, g)); } },
+  // ── 生存系新增 ──
+  { id: "dodge", name: "闪避", icon: "闪", rarity: "rare", faction: "surv", desc: "闪避率 +10%", max: 3, has: g => g.player.dodge >= 0.3, apply: g => { g.player.dodge = Math.min(0.4, (g.player.dodge || 0) + 0.1); } },
+  { id: "thorns", name: "荆棘甲", icon: "棘", rarity: "epic", faction: "surv", desc: "受击反弹 6 伤害", max: 3, has: g => g.player.thorns >= 3, apply: g => { g.player.thorns = (g.player.thorns || 0) + 1; } },
+  { id: "berserk", name: "狂暴", icon: "狂", rarity: "epic", faction: "surv", desc: "生命低于 40% 时伤害 +30%", max: 2, has: g => g.player.berserk >= 2, apply: g => { g.player.berserk = (g.player.berserk || 0) + 1; } }
 ];
 
 // 流派觉醒：连选 3 个同系技能触发
@@ -1544,9 +1625,13 @@ function rollChoices() {
     // 流派热度惩罚：该流派已选次数越多，权重越低（鼓励均衡发展）
     let total = 0;
     const weights = [];
+    // 幸运天赋：稀有度权重提升
+    const luck = game.player.heroLuck || 0;
     for (const u of pool) {
       const picked = game.factionCount[u.faction] || 0;
-      const w = RARITY[u.rarity].weight / (1 + picked * 0.6);
+      let w = RARITY[u.rarity].weight / (1 + picked * 0.6);
+      if (u.rarity === "epic") w *= 1 + luck * 2;
+      if (u.rarity === "legendary") w *= 1 + luck * 3;
       weights.push(w);
       total += w;
     }
@@ -1595,8 +1680,39 @@ const DEFAULTS = {
   talents: { dmg: 0, hp: 0, arrow: 0 },    // 0-3 级
   weaponSkin: 0,                           // 0=木弓 1=火焰弓 2=冰霜弓 3=雷神弓
   chapter: 1,
-  bestWave: 0
+  bestWave: 0,
+  // 英雄等级（局外成长核心）：每局经验 → 升级 → 天赋点
+  heroLevel: 1,
+  heroExp: 0,
+  heroPoints: 0,
+  heroTree: { dmg: 0, rate: 0, hp: 0, crit: 0, gold: 0, luck: 0 }  // 各天赋已加点数
 };
+
+// 英雄天赋树定义（局外成长，每级 1 点，无限成长钩子）
+const HERO_TALENTS = [
+  { id: "dmg", name: "战神", icon: "⚔", desc: "伤害 +5%/级", max: 20, color: "#ffd56a" },
+  { id: "rate", name: "连射", icon: "➶", desc: "射速 +4%/级", max: 20, color: "#7fe0ff" },
+  { id: "hp", name: "不灭", icon: "❤", desc: "生命 +12/级", max: 20, color: "#ff6b81" },
+  { id: "crit", name: "精准", icon: "✦", desc: "暴击 +3%/级", max: 20, color: "#ff9ecb" },
+  { id: "gold", name: "招财", icon: "💰", desc: "金币获取 +8%/级", max: 20, color: "#f7c948" },
+  { id: "luck", name: "幸运", icon: "🍀", desc: "稀有卡概率 +3%/级", max: 20, color: "#8affc1" }
+];
+// 升级所需经验曲线
+function heroExpNeed(level) { return Math.round(80 + level * 45); }
+// 结算经验：击杀+关卡推进
+function gainHeroExp(game, kills, chapter, roomIndex) {
+  const base = kills * 4 + (chapter - 1) * 60 + roomIndex * 10;
+  SaveSystem.data.heroExp += base;
+  let leveled = 0;
+  while (SaveSystem.data.heroExp >= heroExpNeed(SaveSystem.data.heroLevel)) {
+    SaveSystem.data.heroExp -= heroExpNeed(SaveSystem.data.heroLevel);
+    SaveSystem.data.heroLevel++;
+    SaveSystem.data.heroPoints++;
+    leveled++;
+  }
+  SaveSystem.save();
+  return leveled;
+}
 
 // 武器皮肤：不同样式 + 不同加成（换武器动力）
 const WEAPON_SKINS = [
@@ -1630,7 +1746,11 @@ const SaveSystem = {
         talents: { ...DEFAULTS.talents, ...(parsed.talents || {}) },
         weaponSkin: parsed.weaponSkin || 0,
         chapter: parsed.chapter || 1,
-        bestWave: parsed.bestWave || 0
+        bestWave: parsed.bestWave || 0,
+        heroLevel: parsed.heroLevel || 1,
+        heroExp: parsed.heroExp || 0,
+        heroPoints: parsed.heroPoints || 0,
+        heroTree: { ...DEFAULTS.heroTree, ...(parsed.heroTree || {}) }
       };
       return this.data;
     } catch (e) {
@@ -1680,6 +1800,15 @@ function applyMetaProgression(p) {
   p.maxHp = 100 + s.talents.hp * 15;
   p.hp = p.maxHp;
   p.arrowCount = Math.min(5, 1 + s.talents.arrow);
+  // 英雄天赋树加成（局外成长）
+  const ht = s.heroTree || {};
+  p.damage *= 1 + (ht.dmg || 0) * 0.05;
+  p.fireRate *= 1 + (ht.rate || 0) * 0.04;
+  p.maxHp += (ht.hp || 0) * 12;
+  p.hp = p.maxHp;
+  p.crit = Math.min(0.6, p.crit + (ht.crit || 0) * 0.03);
+  p.heroGoldMult = 1 + (ht.gold || 0) * 0.08;
+  p.heroLuck = (ht.luck || 0) * 0.03;
   // 武器皮肤加成
   applyWeaponSkin(p);
 }
@@ -1770,11 +1899,30 @@ class Game {
     Leaderboard.load().catch(() => {});
   }
   closeLeaderboard() { this.state = "MENU"; }
+  openHeroTree() {
+    audio.ensure();
+    this.state = "HERO";
+  }
+  closeHeroTree() { this.state = "MENU"; }
+  // 天赋加点
+  spendHeroPoint(id) {
+    const t = HERO_TALENTS.find(x => x.id === id);
+    const cur = SaveSystem.data.heroTree[id] || 0;
+    if (!t || SaveSystem.data.heroPoints <= 0 || cur >= t.max) return false;
+    SaveSystem.data.heroTree[id] = cur + 1;
+    SaveSystem.data.heroPoints--;
+    SaveSystem.save();
+    audio.upgrade();
+    return true;
+  }
   gameOver() {
     if (this.state !== "PLAY") return;
     this.state = "GAME_OVER";
     audio.death();
     this.bankRunGold();
+    // 英雄经验结算（局外成长）
+    const leveled = gainHeroExp(this, this.kills || 0, this.chapter || 1, this.roomIndex || 0);
+    if (leveled > 0) this.heroLeveledMsg = `英雄升级！Lv.${SaveSystem.data.heroLevel}（+${leveled} 天赋点）`;
     Leaderboard.submit({
       name: this.playerName || Leaderboard.getPlayerName(),
       chapter: this.chapter,
@@ -2132,6 +2280,11 @@ class Game {
   }
   fireArrows() {
     const n = this.player.arrowCount;
+    // 狂暴：低血加伤（血低于 40% 时 +30%/级）
+    let berserkMult = 1;
+    if (this.player.berserk > 0 && this.player.hp / this.player.maxHp < 0.4) {
+      berserkMult = 1 + this.player.berserk * 0.3;
+    }
     // 自动瞄准：找最近的非死亡敌人（弓箭传说2 核心手感），无敌人时垂直向上
     let targetAngle = 0;
     let best = null, bestD = 999999;
@@ -2148,7 +2301,7 @@ class Game {
       const t = n === 1 ? 0 : (i / (n - 1) - 0.5) * spread;
       // 多箭伤害递减：1/0.85/0.7（防止多重箭无脑碾压）
       const dmgMul = n === 1 ? 1 : 1 - i * 0.15;
-      const a = this.arrows.get(this.player.x, this.player.y - 36, targetAngle + t, this.player.damage * dmgMul, this.player.range, this.player.pierce, this.player.crit, this.player.fire, this.player.ice);
+      const a = this.arrows.get(this.player.x, this.player.y - 36, targetAngle + t, this.player.damage * dmgMul * berserkMult, this.player.range, this.player.pierce, this.player.crit, this.player.fire, this.player.ice);
       a.split = this.player.split;
       a.volt = this.player.volt;
       a.frostfire = this.player.frostfire;
@@ -2156,6 +2309,11 @@ class Game {
       a.homing = this.player.homing;
       a.pierceAll = this.player.pierceAll;
       if (this.player.pierceAll) a.pierce = 999;
+      a.bounce = this.player.bounce || 0;
+      a.poison = this.player.poison;
+      a.critDmg = this.player.critDmg || 2;
+      a.swift = this.player.swift || 0;
+      if (a.swift > 0) a.speed *= 1 + a.swift * 0.15;
     }
     // 射击后座：弓口火光粒子 + 屏幕微震（不推人物位移，防止下滑）
     this.shake = Math.max(this.shake || 0, 1.2);
@@ -3397,6 +3555,76 @@ function drawStatsPanel(g, state) {
   g.restore();
 }
 
+function drawHeroTree(g, state) {
+  const s = SaveSystem.data;
+  g.save();
+  g.fillStyle = "rgba(7,12,8,0.9)";
+  g.fillRect(0, 0, CONFIG.W, CONFIG.H);
+  g.textAlign = "center";
+  g.fillStyle = "#fff0c4";
+  g.font = "bold 34px Microsoft YaHei, sans-serif";
+  g.fillText("英雄天赋树", CONFIG.W / 2, 72);
+  // 等级 + 经验条
+  g.fillStyle = "#8affc1";
+  g.font = "bold 20px Microsoft YaHei, sans-serif";
+  g.fillText(`Lv.${s.heroLevel}`, CONFIG.W / 2, 108);
+  const need = heroExpNeed(s.heroLevel);
+  const expP = Util.clamp(s.heroExp / need, 0, 1);
+  g.fillStyle = "rgba(255,255,255,0.12)";
+  roundRect(g, 90, 120, 360, 16, 8); g.fill();
+  g.fillStyle = "#8affc1";
+  roundRect(g, 90, 120, 360 * expP, 16, 8); g.fill();
+  g.fillStyle = "#c8d8c8";
+  g.font = "12px Microsoft YaHei, sans-serif";
+  g.fillText(`经验 ${s.heroExp}/${need}`, CONFIG.W / 2, 152);
+  g.fillStyle = "#f7c948";
+  g.font = "bold 16px Microsoft YaHei, sans-serif";
+  g.fillText(`可用天赋点：${s.heroPoints} ⭐`, CONFIG.W / 2, 182);
+  g.font = "12px Microsoft YaHei, sans-serif";
+  g.fillStyle = "#a9977d";
+  g.fillText("每局结束获得经验，升级得天赋点；加点永久生效", CONFIG.W / 2, 204);
+  // 6 个天赋卡（3x2 网格）
+  HERO_TALENTS.forEach((t, i) => {
+    const col = i % 3;
+    const row = Math.floor(i / 3);
+    const x = 24 + col * 172;
+    const y = 228 + row * 190;
+    const cur = s.heroTree[t.id] || 0;
+    const maxed = cur >= t.max;
+    const canAdd = !maxed && s.heroPoints > 0;
+    g.fillStyle = "rgba(0,0,0,0.4)";
+    roundRect(g, x, y, 160, 172, 12); g.fill();
+    g.strokeStyle = t.color;
+    g.lineWidth = maxed ? 2.5 : 1.5;
+    roundRect(g, x, y, 160, 172, 12); g.stroke();
+    g.fillStyle = t.color;
+    g.font = "bold 30px Microsoft YaHei, sans-serif";
+    g.fillText(t.icon, x + 80, y + 48);
+    g.fillStyle = "#e8eef6";
+    g.font = "bold 17px Microsoft YaHei, sans-serif";
+    g.fillText(t.name, x + 80, y + 80);
+    g.fillStyle = "#9aa5b4";
+    g.font = "12px Microsoft YaHei, sans-serif";
+    g.fillText(t.desc, x + 80, y + 104);
+    g.fillStyle = t.color;
+    g.font = "bold 15px Microsoft YaHei, sans-serif";
+    g.fillText(`Lv.${cur}/${t.max}`, x + 80, y + 132);
+    // 加点按钮
+    g.fillStyle = maxed ? "rgba(74,222,128,0.25)" : canAdd ? t.color : "rgba(255,255,255,0.1)";
+    roundRect(g, x + 32, y + 142, 96, 24, 6); g.fill();
+    g.fillStyle = maxed ? "#4ade80" : canAdd ? "#1a1408" : "#8a94a3";
+    g.font = "bold 13px Microsoft YaHei, sans-serif";
+    g.fillText(maxed ? "已满级" : canAdd ? "+1 点" : "需天赋点", x + 80, y + 160);
+  });
+  // 返回按钮
+  g.fillStyle = "rgba(255,255,255,0.12)";
+  roundRect(g, 210, 882, 120, 44, 10); g.fill();
+  g.fillStyle = "#e8eef6";
+  g.font = "bold 18px Microsoft YaHei, sans-serif";
+  g.fillText("返回", 270, 912);
+  g.restore();
+}
+
 function drawUI(g, state) {
   if (state.state === "PLAY") drawHud(g, state);
   if (state.messageT > 0) {
@@ -3413,6 +3641,7 @@ function drawUI(g, state) {
   }
   if (state.statsPanel) drawStatsPanel(g, state);
   if (state.state === "MENU") drawMenu(g, state);
+  if (state.state === "HERO") drawHeroTree(g, state);
   if (state.state === "LEADERBOARD") drawLeaderboard(g, state);
   if (state.state === "GAME_OVER") drawGameOver(g, state);
 }
@@ -3552,24 +3781,37 @@ function drawMenu(g, state) {
   g.fillText(Leaderboard.champion || "暂无王者", CONFIG.W / 2, 326);
   g.shadowBlur = 0;
   drawButton(g, CONFIG.W / 2 - 105, 376, 210, 62, "开始");
+  // 英雄等级显示
+  g.fillStyle = "#8affc1";
+  g.font = "bold 15px Microsoft YaHei, sans-serif";
+  g.fillText(`英雄 Lv.${SaveSystem.data.heroLevel}  ${SaveSystem.data.heroPoints > 0 ? `⭐${SaveSystem.data.heroPoints} 点未分配` : ""}`, CONFIG.W / 2, 440);
+  // 天赋树按钮
+  g.fillStyle = "rgba(138,255,193,0.16)";
+  roundRect(g, CONFIG.W / 2 - 88, 456, 176, 46, 10); g.fill();
+  g.strokeStyle = "rgba(138,255,193,0.5)";
+  g.lineWidth = 2;
+  roundRect(g, CONFIG.W / 2 - 88, 456, 176, 46, 10); g.stroke();
+  g.fillStyle = "#8affc1";
+  g.font = "bold 18px Microsoft YaHei, sans-serif";
+  g.fillText("天赋树", CONFIG.W / 2, 486);
   // 永久金币显示（局内商店可用）+ 排行榜按钮
   g.fillStyle = "#f7c948";
-  g.font = "bold 16px Microsoft YaHei, sans-serif";
-  g.fillText(`永久金币 ${SaveSystem.data.gold} 💰（局内商店可用）`, CONFIG.W / 2, 452);
+  g.font = "bold 15px Microsoft YaHei, sans-serif";
+  g.fillText(`永久金币 ${SaveSystem.data.gold} 💰（局内商店可用）`, CONFIG.W / 2, 528);
   g.fillStyle = "rgba(168,101,255,0.18)";
-  roundRect(g, CONFIG.W / 2 - 88, 472, 176, 46, 10); g.fill();
+  roundRect(g, CONFIG.W / 2 - 88, 544, 176, 46, 10); g.fill();
   g.strokeStyle = "rgba(168,101,255,0.5)";
   g.lineWidth = 2;
-  roundRect(g, CONFIG.W / 2 - 88, 472, 176, 46, 10); g.stroke();
+  roundRect(g, CONFIG.W / 2 - 88, 544, 176, 46, 10); g.stroke();
   g.fillStyle = "#e8eef6";
   g.font = "bold 18px Microsoft YaHei, sans-serif";
-  g.fillText("排行榜", CONFIG.W / 2, 502);
+  g.fillText("排行榜", CONFIG.W / 2, 574);
   g.fillStyle = "#f1dfbf";
   g.font = "18px Microsoft YaHei, sans-serif";
-  g.fillText(`最高进度：第 ${SaveSystem.data.chapter || 1} 章`, CONFIG.W / 2, 590);
+  g.fillText(`最高进度：第 ${SaveSystem.data.chapter || 1} 章`, CONFIG.W / 2, 626);
   g.font = "16px Microsoft YaHei, sans-serif";
-  const lines = ["←→ / AD 控制横移，触摸拖拽控制角色 X", "每章 6 房：战斗 · 战斗 · 商店 · 战斗 · 精英 · BOSS", "右下角商店随时购买强化，清房后三选一", "击杀章节 Boss 后切换场景并进入下一章"];
-  lines.forEach((line, i) => g.fillText(line, CONFIG.W / 2, 648 + i * 34));
+  const lines = ["←→ / AD 控制横移，触摸拖拽控制角色 X", "每章 6 房：战斗 · 战斗 · 商店 · 战斗 · 精英 · BOSS", "右下角商店随时购买强化，清房后三选一", "英雄等级 → 天赋点 → 局外永久成长"];
+  lines.forEach((line, i) => g.fillText(line, CONFIG.W / 2, 676 + i * 34));
   g.fillStyle = "#a9977d";
   g.font = "14px Microsoft YaHei, sans-serif";
   g.fillText(`音效：${audio.muted ? "关" : "开"}  点击左上角音符切换`, CONFIG.W / 2, 824);
@@ -3666,9 +3908,14 @@ function drawGameOver(g, state) {
   g.fillStyle = "#f1dfbf";
   g.fillText(`局内剩余 ${state.runGold || 0} · 章节奖励 ${state.settlementBonus || 0}`, CONFIG.W / 2, 460);
   drawButton(g, CONFIG.W / 2 - 105, 504, 210, 62, "重开");
+  if (state.heroLeveledMsg) {
+    g.fillStyle = "#ffd56a";
+    g.font = "bold 16px Microsoft YaHei, sans-serif";
+    g.fillText(state.heroLeveledMsg, CONFIG.W / 2, 560);
+  }
   g.fillStyle = "#a9977d";
   g.font = "13px Microsoft YaHei, sans-serif";
-  g.fillText(`永久金币 ${SaveSystem.data.gold} 💰 可在局内商店消费`, CONFIG.W / 2, 590);
+  g.fillText(`英雄 Lv.${SaveSystem.data.heroLevel}（经验 ${SaveSystem.data.heroExp}/${heroExpNeed(SaveSystem.data.heroLevel)}）· 永久金币 ${SaveSystem.data.gold} 💰 可在局内商店消费`, CONFIG.W / 2, 596);
   g.restore();
 }
 
@@ -3831,7 +4078,21 @@ function activateAt(x, y) {
   }
   if (game.state === "MENU") {
     if (x >= CONFIG.W / 2 - 105 && x <= CONFIG.W / 2 + 105 && y >= 376 && y <= 438) game.start();
-    else if (x >= CONFIG.W / 2 - 88 && x <= CONFIG.W / 2 + 88 && y >= 526 && y <= 572) game.openLeaderboard();
+    else if (x >= CONFIG.W / 2 - 88 && x <= CONFIG.W / 2 + 88 && y >= 456 && y <= 502) game.openHeroTree();
+    else if (x >= CONFIG.W / 2 - 88 && x <= CONFIG.W / 2 + 88 && y >= 544 && y <= 590) game.openLeaderboard();
+  } else if (game.state === "HERO") {
+    // 返回
+    if (x >= 210 && x <= 330 && y >= 882 && y <= 926) { game.closeHeroTree(); return; }
+    // 加点（6 卡 3x2 网格）
+    HERO_TALENTS.forEach((t, i) => {
+      const col = i % 3;
+      const row = Math.floor(i / 3);
+      const cx = 24 + col * 172;
+      const cy = 228 + row * 190;
+      if (x >= cx && x <= cx + 160 && y >= cy && y <= cy + 172) {
+        game.spendHeroPoint(t.id);
+      }
+    });
   } else if (game.state === "LEADERBOARD") {
     const tabY = 154, tabW = 112, tabH = 42, gap = 8;
     const startX = (CONFIG.W - tabW * Leaderboard.tabs.length - gap * (Leaderboard.tabs.length - 1)) / 2;
