@@ -2280,12 +2280,16 @@ const DemoAI = {
     }
     if (game.state !== "PLAY") return;
     const px = game.player.x, py = game.player.y;
-    const setTarget = x => { game.input.hover = true; game.input.hoverX = Util.clamp(x, 62, CONFIG.W - 62); };
+    const setTarget = (x, y) => {
+      game.input.hover = true;
+      game.input.hoverX = Util.clamp(x, 62, CONFIG.W - 62);
+      game.input.hoverY = Util.clamp(y == null ? py : y, 150, CONFIG.H - 70);
+    };
 
-    // 1. 宝箱优先：主动去吃
+    // 1. 宝箱优先：主动去吃（x+y 双轴）
     if (game.chest) {
-      setTarget(game.chest.x);
-      if (Math.abs(game.chest.x - px) < 12 && Math.random() < 0.02) this.say("发现宝箱，冲！");
+      setTarget(game.chest.x, game.chest.y);
+      if (Math.hypot(game.chest.x - px, game.chest.y - py) < 40) game.chest = null;
       return;
     }
     if (game.inRunShop) {
@@ -2294,20 +2298,20 @@ const DemoAI = {
         game.buyInRunShop(buyable);
         this.say("局内商店购买临时强化");
       }
-      if (game.gate) setTarget(game.gate.x);
+      if (game.gate) setTarget(game.gate.x, game.gate.y);
       return;
     }
     if (game.gate) {
-      setTarget(game.gate.x);
-      if (Math.abs(game.gate.x - px) < 18 && Math.random() < 0.02) this.say("清房完成，进入下一房");
+      // 主动走向传送门（x+y 双轴，y 必须移动才能碰到 576 高度的门）
+      setTarget(game.gate.x, game.gate.y);
       return;
     }
 
     // 2. 危险检测：弹幕优先（致命），敌人次之
-    let danger = null, dangerD = 1e9;
+    let danger = null, dangerD = 1e9, dangerIsBullet = false;
     for (const b of game.bullets.active()) {
       const d = Math.hypot(b.x - px, b.y - py);
-      if (d < dangerD && b.y > py - 340 && d < 300) { dangerD = d; danger = { x: b.x, y: b.y }; }
+      if (d < dangerD && b.y > py - 340 && d < 300) { dangerD = d; danger = { x: b.x, y: b.y }; dangerIsBullet = true; }
     }
     if (!danger) {
       for (const e of game.enemies.active()) {
@@ -2317,15 +2321,20 @@ const DemoAI = {
       }
     }
 
-    // 3. 目标计算
+    // 3. 目标计算（x 横移 + y 上下，四向移动）
     let targetX = CONFIG.W / 2;
+    let targetY = py;
     if (danger) {
       if (dangerD < 230) {
         // 急躲：远离威胁；贴边时拉回中心，绝不卡边
         const away = px + (px - danger.x) * 1.4;
         targetX = away < 100 || away > CONFIG.W - 100 ? CONFIG.W / 2 : away;
+        // 子弹从下方/上方来时上下闪避
+        if (dangerIsBullet) {
+          targetY = py + (py - danger.y) * 1.2;
+          targetY = Util.clamp(targetY, 180, CONFIG.H - 80);
+        }
         if (dangerD < 120) targetX = CONFIG.W / 2;
-        if (Math.random() < 0.01) this.say(danger.x > px ? "弹幕来了，左闪" : "弹幕来了，右闪");
       } else {
         // 中距离：横向错开半个身位，保持输出
         targetX = px + (px - danger.x) * 0.35;
@@ -2342,13 +2351,14 @@ const DemoAI = {
       if (bestE) {
         // 轻微追向敌人正下方，让箭直射命中
         targetX = bestE.x + (bestE.x - px) * 0.12;
-        if (Math.abs(bestE.x - px) > 140 && Math.random() < 0.008) this.say("锁定目标，对齐射击");
+        // 保持 200-300 输出距离，不贴脸
+        if (bestE.y - py > 260) targetY = py + (bestE.y - py - 220) * 0.5;
       } else {
         // 无敌人：回中心巡航
         targetX = CONFIG.W / 2 + Math.sin(performance.now() * 0.0004) * 60;
       }
     }
-    setTarget(targetX);
+    setTarget(targetX, targetY);
     return;
   },
   render(g) {
