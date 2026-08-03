@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-  <title>箭雨 v3.30</title>
+  <title>箭雨 v3.31</title>
   <style>
     html, body {
       margin: 0;
@@ -50,8 +50,8 @@
   </style>
 </head>
 <body>
-  <canvas id="game" width="540" height="960" aria-label="箭雨 v3.30 游戏画布"></canvas>
-  <div id="landscapeBlocker">请旋转设备为竖屏<br>箭雨 v3.30 仅支持竖屏飞行</div>
+  <canvas id="game" width="540" height="960" aria-label="箭雨 v3.31 游戏画布"></canvas>
+  <div id="landscapeBlocker">请旋转设备为竖屏<br>箭雨 v3.31 仅支持竖屏飞行</div>
 <script>
 "use strict";
 
@@ -1093,7 +1093,7 @@ class Enemy {
       const dy = game.player.y - this.y;
       const d = Math.max(1, Math.hypot(dx, dy));
       // 冲刺怪（小兵/精英swift）加速冲脸，其他缓慢逼近
-      // v3.30: 前期移速下调（小兵 120→100，swift 190→170），新手不会被瞬追
+      // v3.31: 前期移速下调（小兵 120→100，swift 190→170），新手不会被瞬追
       const chase = this.type === "minion" ? (this.isElite ? 140 : 100)
         : this.type === "tank" ? 42
         : this.type === "flyer" ? 88 : 60;
@@ -1203,7 +1203,7 @@ class Enemy {
       } else if (this.eliteAffix === "splitter") {
         // 分裂怪：死亡前加速冲脸（为分裂制造压力）
         // ⚠️ 注意：chaseSpeed 是上面 if 块的块级 let 变量，这里引用会 ReferenceError
-        // 导致 rAF 主循环中断 = 游戏"卡住"（曾修过：v3.30 前的卡死根因）
+        // 导致 rAF 主循环中断 = 游戏"卡住"（曾修过：v3.31 前的卡死根因）
         const sdx = game.player.x - this.x, sdy = game.player.y - this.y;
         const sd = Math.max(1, Math.hypot(sdx, sdy));
         const spd = 160 * slow;
@@ -1214,7 +1214,7 @@ class Enemy {
     if (this.isBoss) this.updateBoss(dt, game, slow);
     if (this.y > CONFIG.H + this.r + 80) this.active = false;
     if (!this.dead && game.player.canBeHit() && Util.circleHit(this, game.player)) {
-      // 碰撞伤害随章节成长（v3.30: 前期温和 13+ch×2，第1章15 可挨3下）
+      // 碰撞伤害随章节成长（v3.31: 前期温和 13+ch×2，第1章15 可挨3下）
       const hitDmg = 13 + (game.chapter || 1) * 2;
       game.player.hurt(hitDmg, game, Math.sign(game.player.x - this.x) * 90, 50);
     }
@@ -1245,37 +1245,38 @@ class Enemy {
     }
     const enrageMult = enrage ? 1.5 : 1;
     // 逼近速度：保持中距压制（太近会退，太远会追）——x/y 同时逼近
-    const chaseSpeed = 70 * slow * (enrage ? 1.25 : 1);
+    // v3.31: 狂暴追速 1.25→1.5，压迫感更强
+    const chaseSpeed = 70 * slow * (enrage ? 1.5 : 1);
     this.x += dx / d * chaseSpeed * dt;
     this.y += dy / d * chaseSpeed * 0.8 * dt;
-    // 冲锋：狂暴前 3.2 秒一次，狂暴后 1.8 秒一次（更频繁压脸）
+    // 冲锋：狂暴前 3.2 秒一次，狂暴后 1.5 秒一次（更频繁压脸）
     this.rushT -= dt;
     if (this.rushT <= 0) {
-      this.rushT = (enrage ? 1.8 : 3.2) + Util.rand(0, 1.2);
-      this.rushing = 1.1;
+      this.rushT = (enrage ? 1.5 : 3.2) + Util.rand(0, 1.2);
+      this.rushing = 1.5; // v3.31: 1.1→1.5s，冲锋距离拉长 36%
       this.rushDirX = dx / d;
       this.rushDirY = dy / d;
       audio.boss();
     }
     if (this.rushing > 0) {
       this.rushing -= dt;
-      const rushSpd = 240 * (enrage ? 1.3 : 1);
+      const rushSpd = 300 * (enrage ? 1.3 : 1); // v3.31: 240→300
       this.x += this.rushDirX * rushSpd * dt;
       this.y += this.rushDirY * rushSpd * dt;
     }
     // 玩家太远时加速逼近，太近时后撤保持压力
     if (d > 320) { this.x += dx / d * 90 * dt; this.y += dy / d * 90 * dt; }
     else if (d < 110 && this.rushing <= 0) { this.x -= dx / d * 60 * dt; this.y -= dy / d * 60 * dt; }
-    // 压迫上限放宽：Boss 可以压到玩家附近（0.72 高度），不是追到一半就停
-    this.y = Util.clamp(this.y, 100, CONFIG.H * 0.72);
+    // 压迫上限放宽：Boss 可以压到玩家附近（0.82 高度），冲锋不再被 clamp 截断
+    this.y = Util.clamp(this.y, 100, CONFIG.H * 0.82);
     this.x = Util.clamp(this.x, 80, CONFIG.W - 80);
     // 多样化攻击：随机攻击顺序（不固定轮换，玩家无法背板）+ 专属 Zone 技能 40% 概率
     this.shootT -= dt;
     if (this.shootT <= 0) {
-      // 狂暴时攻击更密：普通攻击间隔乘 0.65
-      const cdMult = enrage ? 0.65 : 1;
-      // 40% 概率放专属地面技能（zone），否则随机普通攻击
-      if (Math.random() < 0.4) {
+      // 狂暴时攻击更密：普通攻击间隔乘 0.5（v3.31: 0.65→0.5，狂暴攻速翻倍体感明显）
+      const cdMult = enrage ? 0.5 : 1;
+      // 45% 概率放专属地面技能（zone），否则随机普通攻击
+      if (Math.random() < 0.45) {
         this.attackMode = 3;
       } else {
         this.attackMode = Math.floor(Math.random() * 3);
@@ -1293,8 +1294,10 @@ class Enemy {
           this.shootT = (1.8 * cdMult);
           const sm1 = game.enemies.get("minion", this.x + Util.rand(-40, 40), this.y + 70, game.wave);
           const sm2 = game.enemies.get("minion", this.x + Util.rand(-40, 40), this.y + 85, game.wave);
+          const sm3 = game.enemies.get("minion", this.x + Util.rand(-60, 60), this.y + 100, game.wave);
           sm1.isElite = false; sm1.eliteAffix = null; sm1._noSplit = true; // Boss 召唤物非精英
           sm2.isElite = false; sm2.eliteAffix = null; sm2._noSplit = true;
+          sm3.isElite = false; sm3.eliteAffix = null; sm3._noSplit = true;
         } else if (mode === 2) {
           this.shootT = (1.2 * cdMult);
           const a = Math.atan2(py - this.y, px - this.x);
@@ -1370,7 +1373,9 @@ class Enemy {
         } else if (mode === 1) {
           this.shootT = (2.2 * cdMult);
           const stk = game.enemies.get("tank", this.x + Util.rand(-50, 50), this.y + 80, game.wave);
+          const stk2 = game.enemies.get("tank", this.x + Util.rand(-60, 60), this.y + 105, game.wave);
           stk.isElite = false; stk.eliteAffix = null; stk._noSplit = true; // Boss 召唤物非精英
+          stk2.isElite = false; stk2.eliteAffix = null; stk2._noSplit = true;
         } else if (mode === 2) {
           this.shootT = (0.7 * cdMult);
           const a = Math.atan2(py - this.y, px - this.x);
@@ -1427,6 +1432,15 @@ class Enemy {
     } else if (this.fireT > 0) {
       g.shadowBlur = 18;
       g.shadowColor = CONFIG.COLORS.red;
+    } else if (this.isBoss && this.hp < this.maxHp * 0.35) {
+      // 狂暴持续特效：红色发光 + 呼吸脉冲（v3.31 新增，狂暴体感明显）
+      const pulse = 0.5 + 0.5 * Math.sin(performance.now() * 0.012);
+      g.shadowBlur = 26 + 14 * pulse;
+      g.shadowColor = "#ff3b30";
+      // 拖尾火星
+      if (Math.random() < 0.5) {
+        game.particles.get(this.x + Util.rand(-this.r, this.r), this.y + Util.rand(-this.r, this.r), Util.rand(-30, 30), Util.rand(-60, 20), 0.4, "#ff5a4d", Util.rand(2, 4));
+      }
     }
     if (this.isBoss) drawBoss(g, this);
     else if (this.type === "tank") drawTank(g);
@@ -1621,7 +1635,7 @@ class Player {
     this.y = CONFIG.PLAYER_Y;
     this.r = CONFIG.PLAYER_R;
     this.hp = 50;
-    this.maxHp = 50; // v3.30: 40→50，前期容错（第1章碰撞15可挨3下）
+    this.maxHp = 50; // v3.31: 40→50，前期容错（第1章碰撞15可挨3下）
     this.moveSpeed = CONFIG.BASE_MOVE_SPEED;
     this.damage = CONFIG.BASE_ARROW_DAMAGE;
     this.fireRate = CONFIG.BASE_FIRE_RATE;
@@ -4420,7 +4434,7 @@ function drawMenu(g, state) {
   g.shadowBlur = 6 + 6 * pulse;
   g.fillStyle = "#d4c6af";
   g.font = "20px Microsoft YaHei, sans-serif";
-  g.fillText("v3.30 · 房间闯关 · 排行榜 · 每日挑战", CONFIG.W / 2, 292);
+  g.fillText("v3.31 · 房间闯关 · 排行榜 · 每日挑战", CONFIG.W / 2, 292);
   g.fillStyle = "#ffe59a";
   g.font = "bold 18px Microsoft YaHei, sans-serif";
   g.fillText(Leaderboard.champion || "暂无王者", CONFIG.W / 2, 326);
