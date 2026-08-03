@@ -502,6 +502,7 @@ class Arrow {
     this.volt = 0;
     this.frostfire = false;
     this.homing = false;
+    this.pierceAll = false;
     this.hitIds = new Set();
   }
   update(dt, game) {
@@ -735,10 +736,10 @@ class Enemy {
     // 精英怪：非 Boss 波 18% 概率，金色边框 + 词缀 + 5倍金币
     this.isElite = !this.isBoss && Math.random() < 0.18 && wave >= 2;
     this.eliteAffix = this.isElite ? Util.pick(["swift", "huge", "armored", "splitter"]) : null;
-    // 难度曲线：敌人 HP 随波次持续增长（每波 +8%），章节额外加成
+    // 难度曲线：敌人 HP 随波次线性增长（每波 +8%），Boss 线性而非指数
     const chapBonus = 1 + Math.floor((SaveSystem.data.bestWave || 0) / 10) * 0.15;
     const waveBonus = 1 + (wave - 1) * 0.08;
-    let hp = { minion: 26, archer: 38, tank: 95, flyer: 30, boss: 700 + wave * 280 }[type] * chapBonus * waveBonus;
+    let hp = { minion: 26, archer: 38, tank: 95, flyer: 30, boss: 700 + wave * 90 }[type] * chapBonus * waveBonus;
     // 精英词缀加成
     if (this.isElite) {
       hp *= this.eliteAffix === "huge" ? 3.2 : this.eliteAffix === "armored" ? 2.4 : 1.7;
@@ -762,12 +763,13 @@ class Enemy {
     }
   }
   takeDamage(amount, crit, game, fire, ice) {
-    // 抗性结算：装甲=物理减伤50%（元素伤害全额），灵体=元素免疫（物理全额）
+    // 抗性结算（减伤而非免疫，避免玩家死局）：
+    // 装甲=物理减伤50%（元素伤害全额）；灵体=元素减伤50%（物理全额）
     if (this.armored && !fire && !ice) amount *= 0.5;
-    if (this.ethereal && (fire || ice)) amount = 0;
+    if (this.ethereal && (fire || ice)) amount *= 0.5;
     if (amount <= 0) {
-      // 免疫提示
-      if (Math.random() < 0.4) game.particles.get(this.x, this.y - this.r - 10, Util.rand(-10, 10), -40, 0.5, this.ethereal ? "#9fe8ff" : "#cfd4dc", 1, "免疫", false);
+      // 抗性提示
+      if (Math.random() < 0.4) game.particles.get(this.x, this.y - this.r - 10, Util.rand(-10, 10), -40, 0.5, this.ethereal ? "#9fe8ff" : "#cfd4dc", 1, "抗性", false);
       return;
     }
     this.hp -= amount;
@@ -1147,6 +1149,7 @@ class Player {
     this.lifesteal = 0;
     this.orb = 0;
     this.homing = false;
+    this.pierceAll = false;
     this.swords = [];
     this.inv = 0;
     this.fireT = 0;
@@ -1362,6 +1365,7 @@ const UPGRADES = [
   { id: "crit", name: "会心", icon: "暴", rarity: "rare", faction: "shot", desc: "暴击率 +12%（2 倍伤害）", max: 0.6, has: g => g.player.crit >= 0.6, apply: g => { g.player.crit = Math.min(0.6, g.player.crit + 0.12); } },
   { id: "split", name: "分裂箭", icon: "裂", rarity: "legendary", faction: "shot", desc: "命中时分裂 2 支小箭（30% 伤害）", max: 1, has: g => g.player.split, apply: g => { g.player.split = true; } },
   { id: "homing", name: "追踪箭", icon: "导", rarity: "epic", faction: "shot", desc: "箭矢自动追踪敌人（可拐弯）", max: 1, has: g => g.player.homing, apply: g => { g.player.homing = true; } },
+  { id: "pierceAll", name: "贯穿箭", icon: "贯", rarity: "legendary", faction: "shot", desc: "箭矢贯穿所有敌人，射程全屏（传说）", max: 1, has: g => g.player.pierceAll, apply: g => { g.player.pierceAll = true; g.player.homing = true; g.player.range = 99999; } },
   // ── 元素系 ──
   { id: "fire", name: "火焰箭", icon: "火", rarity: "epic", faction: "elem", desc: "命中灼烧 3 秒（8/秒）", max: 1, has: g => g.player.fire, apply: g => { g.player.fire = true; } },
   { id: "ice", name: "冰霜箭", icon: "冰", rarity: "epic", faction: "elem", desc: "命中减速 50% 2.5 秒", max: 1, has: g => g.player.ice, apply: g => { g.player.ice = true; } },
@@ -1947,9 +1951,11 @@ class Game {
       a.frostfire = this.player.frostfire;
       a.lifesteal = this.player.lifesteal;
       a.homing = this.player.homing;
+      a.pierceAll = this.player.pierceAll;
+      if (this.player.pierceAll) a.pierce = 999;
     }
-    // 射击后座：玩家轻微下压 + 弓口火光粒子
-    this.player.knockY += 26;
+    // 射击后座：弓口火光粒子 + 屏幕微震（不推人物位移，防止下滑）
+    this.shake = Math.max(this.shake || 0, 1.2);
     for (let i = 0; i < 3; i++) {
       this.particles.get(this.player.x + Util.rand(-6, 6), this.player.y - 40, Util.rand(-20, 20), Util.rand(-60, -20), 0.2, Util.pick(["#eadcff", "#a865ff"]), Util.rand(2, 4));
     }
