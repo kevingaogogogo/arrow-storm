@@ -797,27 +797,35 @@ class Enemy {
     }
     if (this.iceT > 0) this.iceT -= dt;
     const slow = this.iceT > 0 ? 0.5 / (game.player.slowMult || 1) : 1;
-    // 逼近压力：所有敌人随波次缓慢下压（随飞行滚动），波次越高压得越快
-    // 基础下压速度：随波次递增（5波后开始明显，防站桩）
-    const press = Math.min(46, Math.max(0, (game.wave - 3) * 5)) * slow;
-    // 冲向玩家（minion/精英 swift）：进入 320px 后加速冲脸
-    if ((this.type === "minion" || (this.isElite && this.eliteAffix === "swift")) && !this.isBoss) {
+    // 房间制：敌人主动朝玩家移动（不再依赖滚动）
+    // 小兵/坦克/飞行怪持续向玩家靠近，射手保持距离
+    if (!this.isBoss && this.type !== "archer") {
       const dx = game.player.x - this.x;
       const dy = game.player.y - this.y;
-      const d = Math.hypot(dx, dy);
-      if (d < 340 && this.y < game.player.y + 60) {
-        const sp = this.isElite ? 190 : 120;
-        this.x += dx / d * sp * slow * dt;
-        this.y += dy / d * sp * slow * dt;
+      const d = Math.max(1, Math.hypot(dx, dy));
+      // 冲刺怪（小兵/精英swift）加速冲脸，其他缓慢逼近
+      const chase = this.type === "minion" ? (this.isElite ? 150 : 95)
+        : this.type === "tank" ? 42
+        : this.type === "flyer" ? 80 : 55;
+      const chaseSpeed = (this.isElite && this.eliteAffix === "swift" ? 190 : chase) * slow;
+      this.x += dx / d * chaseSpeed * dt;
+      this.y += dy / d * chaseSpeed * dt;
+    } else if (!this.isBoss && this.type === "archer") {
+      // 射手：保持距离（玩家靠近则后退，远离则前进）
+      const dx = game.player.x - this.x;
+      const dy = game.player.y - this.y;
+      const d = Math.max(1, Math.hypot(dx, dy));
+      if (d < 240) {
+        this.x -= dx / d * 55 * slow * dt;
+        this.y -= dy / d * 55 * slow * dt;
+      } else if (d > 360) {
+        this.x += dx / d * 40 * slow * dt;
+        this.y += dy / d * 40 * slow * dt;
       }
     }
-    if (this.type === "tank") this.y += (this.baseSpeed + press * 0.5) * slow * dt;
-    else if (this.type === "flyer") {
-      this.x += Math.sin(this.t * 2.4 + this.drift) * 55 * dt;
-      this.y += (Math.cos(this.t * 1.8) * 12 + press * 0.7) * slow * dt;
-    } else if (!this.isBoss && this.type !== "minion") {
-      // archer 等也缓慢下压逼近
-      this.y += press * slow * dt;
+    // 飘动感：飞行怪左右摆动
+    if (this.type === "flyer") {
+      this.x += Math.sin(this.t * 2.4 + this.drift) * 30 * dt;
     }
     if (this.type === "archer") {
       this.shootT -= dt;
@@ -1134,18 +1142,24 @@ class Player {
   }
   update(dt, game) {
     let targetX = this.x;
-    if (game.input.touching) targetX = game.input.touchX;
-    else if (game.input.hover) targetX = game.input.hoverX;
-    else targetX += (game.input.right - game.input.left) * this.moveSpeed * dt;
+    let targetY = this.y;
+    if (game.input.touching || game.input.hover) {
+      targetX = game.input.touching ? game.input.touchX : game.input.hoverX;
+      targetY = game.input.touching ? game.input.touchY : game.input.hoverY;
+    } else {
+      targetX += (game.input.right - game.input.left) * this.moveSpeed * dt;
+      targetY += (game.input.down - game.input.up) * this.moveSpeed * 0.75 * dt;
+    }
     this.x += (targetX - this.x) * (game.input.touching || game.input.hover ? Math.min(1, dt * 14) : 1);
+    this.y += (targetY - this.y) * (game.input.touching || game.input.hover ? Math.min(1, dt * 14) : 1);
     this.lastX = this.x;
     this.lastY = this.y;
     this.x += this.knockX * dt;
     this.y += this.knockY * dt;
     this.knockX *= Math.pow(0.05, dt);
     this.knockY *= Math.pow(0.05, dt);
-    this.x = Util.clamp(this.x, 60, CONFIG.W - 60);
-    this.y = Util.clamp(this.y, CONFIG.H * 0.73, CONFIG.H * 0.88);
+    this.x = Util.clamp(this.x, 40, CONFIG.W - 40);
+    this.y = Util.clamp(this.y, 120, CONFIG.H - 60);
     // 移动拖尾：横移时留下紫色尾迹
     const moveSpeed = Math.abs(this.x - (this.lastX || this.x)) / Math.max(0.001, dt);
     if (moveSpeed > 120 && Math.random() < 0.5) {
@@ -1503,7 +1517,7 @@ class Game {
     this.bullets = new Pool(Bullet);
     this.coins = new Pool(Coin);
     this.particles = new Pool(Particle);
-    this.input = { left: 0, right: 0, touching: false, touchX: CONFIG.W / 2, hover: false, hoverX: CONFIG.W / 2 };
+    this.input = { left: 0, right: 0, up: 0, down: 0, touching: false, touchX: CONFIG.W / 2, touchY: CONFIG.PLAYER_Y, hover: false, hoverX: CONFIG.W / 2, hoverY: CONFIG.PLAYER_Y };
     this.state = "MENU";
     this.highScore = Number(localStorage.getItem("arrowStormHighScore") || "0");
     this.decor = [];
@@ -1746,7 +1760,8 @@ class Game {
     this.flashMessage("神秘商人：局内金币可购买临时强化");
   }
   spawnGate() {
-    this.gate = { x: CONFIG.W / 2, y: CONFIG.H * 0.73, r: 48, pulse: 0 };
+    // 传送门：房间中央偏上，玩家四向移动可达
+    this.gate = { x: CONFIG.W / 2, y: CONFIG.H * 0.6, r: 48, pulse: 0 };
     audio.upgrade();
   }
   chooseUpgrade(idx) {
@@ -2101,62 +2116,52 @@ const DemoAI = {
 
 function drawWorld(g, state) {
   const th = getTheme();
+  // 房间地板：固定场地（弓箭传说2 风格），不再滚动道路
   const grad = g.createLinearGradient(0, 0, 0, CONFIG.H);
   grad.addColorStop(0, th.grassFar);
   grad.addColorStop(1, th.grassNear);
   g.fillStyle = grad;
   g.fillRect(0, 0, CONFIG.W, CONFIG.H);
-  g.save();
-  g.globalAlpha = 0.5;
-  for (let i = 0; i < 50; i++) {
-    const y = i * 42 - 42;
-    g.strokeStyle = i % 2 ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.05)";
-    g.beginPath();
-    g.moveTo(0, y);
-    g.lineTo(CONFIG.W, y + 18);
-    g.stroke();
+  // 房间边界：上下左右深色边框（场地感）
+  const border = "rgba(20,16,10,0.55)";
+  g.fillStyle = border;
+  g.fillRect(0, 0, CONFIG.W, 18);                       // 顶
+  g.fillRect(0, CONFIG.H - 22, CONFIG.W, 22);           // 底
+  g.fillRect(0, 0, 16, CONFIG.H);                       // 左
+  g.fillRect(CONFIG.W - 16, 0, 16, CONFIG.H);           // 右
+  // 场地地面：中央石板区（内层浅色，有边界线）
+  const floorGrad = g.createLinearGradient(0, 90, 0, CONFIG.H - 30);
+  floorGrad.addColorStop(0, th.roadFar);
+  floorGrad.addColorStop(1, th.roadNear);
+  g.fillStyle = floorGrad;
+  g.fillRect(24, 24, CONFIG.W - 48, CONFIG.H - 52);
+  // 地面网格线（石板拼缝，固定不滚动）
+  g.strokeStyle = "rgba(0,0,0,0.12)";
+  g.lineWidth = 2;
+  g.beginPath();
+  for (let row = 0; row < 9; row++) {
+    const gy = 40 + row * ((CONFIG.H - 80) / 8);
+    g.moveTo(28, gy);
+    g.lineTo(CONFIG.W - 28, gy);
   }
-  g.restore();
-  g.fillStyle = th.roadFar;
-  g.beginPath();
-  g.moveTo(CONFIG.W / 2 - CONFIG.ROAD_TOP_W / 2, 0);
-  g.lineTo(CONFIG.W / 2 + CONFIG.ROAD_TOP_W / 2, 0);
-  g.lineTo(CONFIG.W / 2 + CONFIG.ROAD_BOTTOM_W / 2, CONFIG.H);
-  g.lineTo(CONFIG.W / 2 - CONFIG.ROAD_BOTTOM_W / 2, CONFIG.H);
-  g.closePath();
-  g.fill();
-  const roadGrad = g.createLinearGradient(0, 0, 0, CONFIG.H);
-  roadGrad.addColorStop(0, th.roadFar);
-  roadGrad.addColorStop(1, th.roadNear);
-  g.fillStyle = roadGrad;
-  g.beginPath();
-  g.moveTo(CONFIG.W / 2 - CONFIG.ROAD_TOP_W / 2 + 12, 0);
-  g.lineTo(CONFIG.W / 2 + CONFIG.ROAD_TOP_W / 2 - 12, 0);
-  g.lineTo(CONFIG.W / 2 + CONFIG.ROAD_BOTTOM_W / 2 - 20, CONFIG.H);
-  g.lineTo(CONFIG.W / 2 - CONFIG.ROAD_BOTTOM_W / 2 + 20, CONFIG.H);
-  g.closePath();
-  g.fill();
-  g.strokeStyle = th.roadEdge;
-  g.lineWidth = 5;
-  g.beginPath();
-  g.moveTo(CONFIG.W / 2 - CONFIG.ROAD_TOP_W / 2, 0);
-  g.lineTo(CONFIG.W / 2 - CONFIG.ROAD_BOTTOM_W / 2, CONFIG.H);
-  g.moveTo(CONFIG.W / 2 + CONFIG.ROAD_TOP_W / 2, 0);
-  g.lineTo(CONFIG.W / 2 + CONFIG.ROAD_BOTTOM_W / 2, CONFIG.H);
+  for (let col = 0; col < 6; col++) {
+    const gx = 40 + col * ((CONFIG.W - 80) / 5);
+    g.moveTo(gx, 28);
+    g.lineTo(gx, CONFIG.H - 28);
+  }
   g.stroke();
-  // 道路动态光斑：随飞行流动的光影（主题配色）
-  g.save();
-  g.globalAlpha = 0.08;
-  for (let i = 0; i < 6; i++) {
-    const ly = i * 170 - 60 + Math.sin(performance.now() * 0.0008 + i) * 18;
-    const lw = Util.roadWidth(ly) * 0.55;
-    const lx = CONFIG.W / 2 + Math.sin(i * 2.4 + performance.now() * 0.0005) * 40;
-    g.fillStyle = th.light[i % 2];
+  // 场地边缘高光
+  g.strokeStyle = th.roadEdge;
+  g.lineWidth = 4;
+  g.strokeRect(24, 24, CONFIG.W - 48, CONFIG.H - 52);
+  // 房间角落装饰（柱子）
+  g.fillStyle = "rgba(0,0,0,0.25)";
+  for (const [cx, cy] of [[30, 30], [CONFIG.W - 30, 30], [30, CONFIG.H - 30], [CONFIG.W - 30, CONFIG.H - 30]]) {
     g.beginPath();
-    g.ellipse(lx, ly, lw * 0.32, 16 + ly / CONFIG.H * 14, 0, 0, TAU);
+    g.arc(cx, cy, 8, 0, TAU);
     g.fill();
   }
-  g.restore();
+  // 场景装饰（树/石头等，房间内点缀）
   for (const d of [...state.decor].sort((a, b) => a.y - b.y)) drawDecor(g, d);
   drawLeaves(g, state.leaves, th.leaf);
   // 场景过渡横幅（淡入淡出）
@@ -3355,6 +3360,8 @@ window.addEventListener("keydown", e => {
   if (DEMO) return;
   if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A") game.input.left = 1;
   if (e.key === "ArrowRight" || e.key === "d" || e.key === "D") game.input.right = 1;
+  if (e.key === "ArrowUp" || e.key === "w" || e.key === "W") game.input.up = 1;
+  if (e.key === "ArrowDown" || e.key === "s" || e.key === "S") game.input.down = 1;
   // 三选一：键盘 1/2/3 直接选择
   if (game.state === "CHOOSE" && game.choices) {
     if (e.key === "1") { game.chooseUpgrade(0); return; }
@@ -3370,6 +3377,8 @@ window.addEventListener("keydown", e => {
 window.addEventListener("keyup", e => {
   if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A") game.input.left = 0;
   if (e.key === "ArrowRight" || e.key === "d" || e.key === "D") game.input.right = 0;
+  if (e.key === "ArrowUp" || e.key === "w" || e.key === "W") game.input.up = 0;
+  if (e.key === "ArrowDown" || e.key === "s" || e.key === "S") game.input.down = 0;
 });
 canvas.addEventListener("pointerdown", e => {
   // AI 演示模式：禁用一切指针输入
@@ -3378,19 +3387,22 @@ canvas.addEventListener("pointerdown", e => {
   activateAt(p.x, p.y);
   game.input.touching = true;
   game.input.touchX = p.x;
+  game.input.touchY = p.y;
   canvas.setPointerCapture(e.pointerId);
 });
 canvas.addEventListener("pointermove", e => {
   // AI 演示模式：禁用鼠标悬停控制，AI 独占
   if (DEMO) return;
   const p = canvasPoint(e);
-  // PC 鼠标：未按下时悬停即可控制角色（跟随鼠标X）
+  // PC 鼠标：未按下时悬停即可控制角色（跟随鼠标XY）
   if (!game.input.touching && e.pointerType === "mouse") {
     game.input.hoverX = p.x;
+    game.input.hoverY = p.y;
     game.input.hover = true;
     return;
   }
   game.input.touchX = p.x;
+  game.input.touchY = p.y;
 });
 canvas.addEventListener("pointerup", e => {
   game.input.touching = false;
