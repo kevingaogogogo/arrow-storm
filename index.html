@@ -661,6 +661,26 @@ class Arrow {
           }
           for (let i = 0; i < 20; i++) game.particles.get(e.x, e.y, Util.rand(-120, 120), Util.rand(-140, 40), 0.5, Util.pick(["#ff7b3d", "#5fc6ff"]), Util.rand(3, 7));
         }
+        // 法杖专属：元素新星（命中爆炸 AOE）
+        if (this.staveNova) {
+          for (const e2 of game.enemies.active()) {
+            if (e2 === e || e2.dead) continue;
+            if (Util.dist2(e, e2) <= 130 * 130) e2.takeDamage(this.damage * 0.6, false, game, this.fire, this.ice);
+          }
+          for (let i = 0; i < 18; i++) game.particles.get(e.x, e.y, Util.rand(-130, 130), Util.rand(-140, 40), 0.5, Util.pick(["#c77dff", "#ff7b3d", "#5fc6ff"]), Util.rand(3, 7));
+        }
+        // 法杖专属：法球分裂（命中生成 2 个小法球）
+        if (this.staveSplit && !this._splitDone) {
+          this._splitDone = true;
+          for (let s = 0; s < 2; s++) {
+            const na = game.arrows.get(e.x, e.y - 10, this.angle + (s === 0 ? 1.2 : -1.2), this.damage * 0.35, 500, 0, 0, this.fire, this.ice);
+            na.isStave = true; na.volt = 0; na.homing = false;
+          }
+        }
+        // 法杖专属：灵魂汲取（命中回血）
+        if (this.staveDrain > 0) {
+          game.player.hp = Math.min(game.player.maxHp, game.player.hp + this.staveDrain);
+        }
         this.pierce -= 1;
         if (this.pierce < 0) this.active = false;
       }
@@ -1525,6 +1545,13 @@ class Player {
     this.swift = 0;         // 迅捷（箭速）
     this.ricochet = 0;      // 弹射敌人数
     this.frostZoneT = 0;    // 冰域减速计时
+    // 法杖专属卡
+    this.stavePower = 0;    // 法力强化（能量球 +20% 伤害/级）
+    this.staveSplit = false; // 法球分裂
+    this.staveNova = false;  // 元素新星（命中爆炸）
+    this.stavePierce = 0;    // 奥术穿透（能量球穿透 +1/级）
+    this.staveDrain = 0;     // 灵魂汲取（命中回血/级）
+    this.weaponCatOverride = undefined; // 局内武器转换（undefined=用局外配置）
     this.swords = [];
     this.inv = 0;
     this.pickedUpgrades = [];
@@ -1797,19 +1824,29 @@ const RARITY = {
 // icon 用简单字符图标（Canvas 绘制）
 const UPGRADES = [
   // ── 弹道系 ──
-  { id: "damage", name: "强弓", icon: "弓", rarity: "common", faction: "shot", desc: "弓箭伤害 +15%", max: 6, has: g => g.player.damagePick >= 6, apply: g => { g.player.damagePick = (g.player.damagePick || 0) + 1; g.player.damage += Math.round(CONFIG.BASE_ARROW_DAMAGE * 0.15); } },
+  { id: "damage", name: "强弓", icon: "弓", rarity: "common", faction: "shot", weapon: "bow", desc: "弓箭伤害 +15%", max: 6, has: g => g.player.damagePick >= 6, apply: g => { g.player.damagePick = (g.player.damagePick || 0) + 1; g.player.damage += Math.round(CONFIG.BASE_ARROW_DAMAGE * 0.15); } },
   { id: "rate", name: "疾射", icon: "速", rarity: "rare", faction: "shot", desc: "射击频率 +12%", max: 6, has: g => g.player.fireRate >= 6, apply: g => { g.player.fireRate = Math.min(6, g.player.fireRate * 1.12); } },
-  { id: "multi", name: "多重箭", icon: "箭", rarity: "epic", faction: "shot", desc: "箭矢数量 +1（最多 3 支，多箭伤害递减）", max: 3, has: g => g.player.arrowCount >= 3, apply: g => { g.player.arrowCount = Math.min(3, g.player.arrowCount + 1); } },
+  { id: "multi", name: "多重箭", icon: "箭", rarity: "epic", faction: "shot", weapon: "bow", desc: "箭矢数量 +1（最多 3 支，多箭伤害递减）", max: 3, has: g => g.player.arrowCount >= 3, apply: g => { g.player.arrowCount = Math.min(3, g.player.arrowCount + 1); } },
   { id: "pierce", name: "穿透", icon: "穿", rarity: "epic", faction: "shot", desc: "箭矢穿透 +1", max: 3, has: g => g.player.pierce >= 3, apply: g => { g.player.pierce = Math.min(3, g.player.pierce + 1); } },
   { id: "crit", name: "会心", icon: "暴", rarity: "rare", faction: "shot", desc: "暴击率 +12%（2 倍伤害）", max: 0.6, has: g => g.player.crit >= 0.6, apply: g => { g.player.crit = Math.min(0.6, g.player.crit + 0.12); } },
-  { id: "split", name: "分裂箭", icon: "裂", rarity: "legendary", faction: "shot", desc: "命中时分裂 2 支小箭（30% 伤害）", max: 1, has: g => g.player.split, apply: g => { g.player.split = true; } },
-  { id: "homing", name: "追踪箭", icon: "导", rarity: "epic", faction: "shot", desc: "箭矢自动追踪敌人（可拐弯）", max: 1, has: g => g.player.homing, apply: g => { g.player.homing = true; } },
-  { id: "pierceAll", name: "贯穿箭", icon: "贯", rarity: "legendary", faction: "shot", desc: "箭矢贯穿所有敌人，射程全屏（传说）", max: 1, has: g => g.player.pierceAll, apply: g => { g.player.pierceAll = true; g.player.homing = true; g.player.range = 99999; } },
-  // ── 元素系 ──
-  { id: "fire", name: "火焰箭", icon: "火", rarity: "epic", faction: "elem", desc: "命中灼烧 3 秒（8/秒）", max: 1, has: g => g.player.fire, apply: g => { g.player.fire = true; } },
-  { id: "ice", name: "冰霜箭", icon: "冰", rarity: "epic", faction: "elem", desc: "命中减速 50% 2.5 秒", max: 1, has: g => g.player.ice, apply: g => { g.player.ice = true; } },
-  { id: "volt", name: "雷电箭", icon: "雷", rarity: "legendary", faction: "elem", desc: "命中弹射至最近敌人（50% 伤害）", max: 2, has: g => g.player.volt >= 2, apply: g => { g.player.volt = (g.player.volt || 0) + 1; } },
-  { id: "frostfire", name: "冰火共鸣", icon: "熔", rarity: "legendary", faction: "elem", desc: "冰冻中的敌人受火伤时爆炸", max: 1, has: g => g.player.frostfire, apply: g => { g.player.frostfire = true; } },
+  { id: "split", name: "分裂箭", icon: "裂", rarity: "legendary", faction: "shot", weapon: "bow", desc: "命中时分裂 2 支小箭（30% 伤害）", max: 1, has: g => g.player.split, apply: g => { g.player.split = true; } },
+  { id: "homing", name: "追踪箭", icon: "导", rarity: "epic", faction: "shot", weapon: "bow", desc: "箭矢自动追踪敌人（可拐弯）", max: 1, has: g => g.player.homing, apply: g => { g.player.homing = true; } },
+  { id: "pierceAll", name: "贯穿箭", icon: "贯", rarity: "legendary", faction: "shot", weapon: "bow", desc: "箭矢贯穿所有敌人，射程全屏（传说）", max: 1, has: g => g.player.pierceAll, apply: g => { g.player.pierceAll = true; g.player.homing = true; g.player.range = 99999; } },
+  // ── 元素系（法杖专属：能量球元素强化）──
+  { id: "fire", name: "火焰箭", icon: "火", rarity: "epic", faction: "elem", weapon: "stave", desc: "命中灼烧 3 秒（8/秒）", max: 1, has: g => g.player.fire, apply: g => { g.player.fire = true; } },
+  { id: "ice", name: "冰霜箭", icon: "冰", rarity: "epic", faction: "elem", weapon: "stave", desc: "命中减速 50% 2.5 秒", max: 1, has: g => g.player.ice, apply: g => { g.player.ice = true; } },
+  { id: "volt", name: "雷电箭", icon: "雷", rarity: "legendary", faction: "elem", weapon: "stave", desc: "命中弹射至最近敌人（50% 伤害）", max: 2, has: g => g.player.volt >= 2, apply: g => { g.player.volt = (g.player.volt || 0) + 1; } },
+  { id: "frostfire", name: "冰火共鸣", icon: "熔", rarity: "legendary", faction: "elem", weapon: "stave", desc: "冰冻中的敌人受火伤时爆炸", max: 1, has: g => g.player.frostfire, apply: g => { g.player.frostfire = true; } },
+  { id: "poison", name: "剧毒箭", icon: "毒", rarity: "epic", faction: "elem", weapon: "stave", desc: "命中中毒 4/秒 3 秒（无视护甲）", max: 1, has: g => g.player.poison, apply: g => { g.player.poison = true; } },
+  { id: "chain", name: "连锁闪电", icon: "链", rarity: "legendary", faction: "elem", weapon: "stave", desc: "雷电弹射 +1 次（追加伤害）", max: 2, has: g => g.player.volt >= 3, apply: g => { g.player.volt = (g.player.volt || 0) + 1; } },
+  { id: "elemMaster", name: "元素大师", icon: "元", rarity: "rare", faction: "elem", desc: "元素强度 +30%", max: 3, has: g => g.player.elemBoost >= 2.2, apply: g => { g.player.elemBoost = Math.min(3, (g.player.elemBoost || 1) + 0.3); } },
+  // ── 法杖专属卡（能量球机制强化，弓箭传说2 法师流）──
+  { id: "stavePower", name: "法力强化", icon: "法", rarity: "common", faction: "elem", weapon: "stave", desc: "能量球伤害 +20%", max: 5, has: g => g.player.stavePower >= 5, apply: g => { g.player.stavePower = (g.player.stavePower || 0) + 1; } },
+  { id: "staveSplit", name: "法球分裂", icon: "分", rarity: "epic", faction: "elem", weapon: "stave", desc: "能量球命中时分裂 2 个小法球（35% 伤害）", max: 1, has: g => g.player.staveSplit, apply: g => { g.player.staveSplit = true; } },
+  { id: "staveNova", name: "元素新星", icon: "星", rarity: "legendary", faction: "elem", weapon: "stave", desc: "能量球命中时爆炸，对周围造成 60% 伤害", max: 1, has: g => g.player.staveNova, apply: g => { g.player.staveNova = true; } },
+  { id: "staveMana", name: "法力涌动", icon: "涌", rarity: "rare", faction: "elem", weapon: "stave", desc: "施法频率 +15%", max: 4, has: g => g.player.staveMana >= 4, apply: g => { g.player.staveMana = (g.player.staveMana || 0) + 1; g.player.fireRate = Math.min(6, g.player.fireRate * 1.15); } },
+  { id: "stavePierce", name: "奥术穿透", icon: "奥", rarity: "epic", faction: "elem", weapon: "stave", desc: "能量球穿透 +1", max: 3, has: g => g.player.stavePierce >= 3, apply: g => { g.player.stavePierce = (g.player.stavePierce || 0) + 1; } },
+  { id: "staveDrain", name: "灵魂汲取", icon: "汲", rarity: "epic", faction: "elem", weapon: "stave", desc: "能量球命中回复 1 生命", max: 2, has: g => g.player.staveDrain >= 2, apply: g => { g.player.staveDrain = (g.player.staveDrain || 0) + 1; } },
   // ── 召唤系 ──
   { id: "sword", name: "御剑", icon: "剑", rarity: "epic", faction: "summon", desc: "飞剑 +1（自动索敌斩击）", max: 3, has: g => g.player.swords.length >= 3, apply: g => { if (g.player.swords.length < 3) g.player.swords.push(new Sword(g.player.swords.length, g)); } },
   { id: "fly", name: "骑剑加速", icon: "骑", rarity: "rare", faction: "summon", desc: "飞行速度 +12%", max: 0.6, has: g => g.flyBonus >= 0.6, apply: g => { g.flyBonus = Math.min(0.6, g.flyBonus + 0.12); } },
@@ -1827,10 +1864,7 @@ const UPGRADES = [
   { id: "bounce", name: "弹射墙", icon: "弹", rarity: "rare", faction: "shot", desc: "箭撞到房间边缘反弹 1 次", max: 2, has: g => g.player.bounce >= 2, apply: g => { g.player.bounce = (g.player.bounce || 0) + 1; } },
   { id: "critDmg", name: "致命一击", icon: "杀", rarity: "epic", faction: "shot", desc: "暴击伤害 2 倍 → 2.6 倍", max: 2, has: g => g.player.critDmg >= 2.6, apply: g => { g.player.critDmg = Math.min(2.6, g.player.critDmg + 0.3); } },
   { id: "swift", name: "迅捷箭", icon: "迅", rarity: "common", faction: "shot", desc: "箭速 +15%（更快命中）", max: 2, has: g => g.player.swift >= 2, apply: g => { g.player.swift = (g.player.swift || 0) + 1; } },
-  // ── 元素系新增 ──
-  { id: "poison", name: "剧毒箭", icon: "毒", rarity: "epic", faction: "elem", desc: "命中中毒 4/秒 3 秒（无视护甲）", max: 1, has: g => g.player.poison, apply: g => { g.player.poison = true; } },
-  { id: "chain", name: "连锁闪电", icon: "链", rarity: "legendary", faction: "elem", desc: "雷电弹射 +1 次（追加伤害）", max: 2, has: g => g.player.volt >= 3, apply: g => { g.player.volt = (g.player.volt || 0) + 1; } },
-  { id: "elemMaster", name: "元素大师", icon: "元", rarity: "rare", faction: "elem", desc: "元素强度 +30%", max: 3, has: g => g.player.elemBoost >= 2.2, apply: g => { g.player.elemBoost = Math.min(3, (g.player.elemBoost || 1) + 0.3); } },
+  // ── 元素系新增（已被上面 stave 版替代）──
   // ── 召唤系新增 ──
   { id: "ricochet", name: "弹射剑", icon: "回", rarity: "epic", faction: "summon", desc: "御剑命中后弹射至附近敌人", max: 2, has: g => g.player.ricochet >= 2, apply: g => { g.player.ricochet = (g.player.ricochet || 0) + 1; } },
   { id: "summonDmg", name: "御剑之力", icon: "御", rarity: "rare", faction: "summon", desc: "御剑伤害 +25%", max: 3, has: g => g.player.summonBoost >= 1.75, apply: g => { g.player.summonBoost = Math.min(2.5, (g.player.summonBoost || 1) + 0.25); } },
@@ -1850,8 +1884,11 @@ const FACTION_AWAKEN = {
 };
 
 // 三选一：按稀有度权重抽取 3 个不重复升级，且保证流派多样性
+// 武器分流：卡片带 weapon 字段（bow=弓专属 / stave=法杖专属 / 无=通用）
+// 法杖模式只出 stave+通用卡；弓模式只出 bow+通用卡 —— 两职业卡池截然不同
 function rollChoices() {
-  const avail = UPGRADES.filter(u => !u.has(game));
+  const curWeapon = isStaveMode() ? "stave" : "bow";
+  const avail = UPGRADES.filter(u => !u.has(game) && (!u.weapon || u.weapon === curWeapon));
   const picks = [];
   const usedIds = new Set();
   const usedFactions = new Set();
@@ -1902,7 +1939,7 @@ function getInRunShopItems() {
     { id: "shop_heal", name: "生命药水", icon: "心", price: 20, desc: "回复 50% 生命", apply: g => { g.player.hp = Math.min(g.player.maxHp, g.player.hp + g.player.maxHp * 0.5); } },
     { id: "shop_shield", name: "护盾符文", icon: "盾", price: 20, desc: "护盾 +1", apply: g => { g.player.shield = (g.player.shield || 0) + 1; } },
     { id: "shop_arrow", name: "多重箭袋", icon: "箭", price: 20, desc: "箭矢 +1", apply: g => { g.player.arrowCount = Math.min(3, g.player.arrowCount + 1); } },
-    { id: "shop_pierce", name: "穿透刻印", icon: "穿", price: 20, desc: "穿透 +1", apply: g => { g.player.pierce = Math.min(3, g.player.pierce + 1); } }
+    { id: "shop_switch", name: "武器转换卷轴", icon: "转", price: 20, desc: "本局切换弓/法杖，卡池跟随", apply: g => { g.player.weaponCatOverride = 1 - (g.player.weaponCatOverride ?? SaveSystem.data.weaponCat); g.flashMessage(g.player.weaponCatOverride === 1 ? "本局已切换法杖路线！" : "本局已切换弓箭路线！"); } }
   ];
 }
 
@@ -1914,8 +1951,9 @@ const DEFAULTS = {
   gold: 0,
   equip: { bow: 0, charm: 0, sigil: 0 },   // 0-3 级
   talents: { dmg: 0, hp: 0, arrow: 0 },    // 0-3 级
-  weaponSkin: 0,                           // 0=木弓 1=火焰弓 2=冰霜弓 3=雷神弓
+  weaponSkin: 0,                           // 当前路线装备 id（弓/法杖共用 0-3）
   weaponCat: 0,                            // 0=弓 1=法杖（双武器路线）
+  weaponOwn: { bow: [0], stave: [] },      // 各路线已拥有武器 id（分开记录，互不干扰）
   chapter: 1,
   bestWave: 0,
   // 英雄等级（局外成长核心）：每局经验 → 升级 → 天赋点
@@ -1969,7 +2007,13 @@ const WEAPON_STAVES = [
 ];
 function getWeaponSkin() { return WEAPON_SKINS[SaveSystem.data.weaponSkin] || WEAPON_SKINS[0]; }
 function getWeaponStave() { return WEAPON_STAVES[SaveSystem.data.weaponSkin] || WEAPON_STAVES[0]; }
-function isStaveMode() { return SaveSystem.data.weaponCat === 1; }
+// 当前生效武器路线：局内转换卷轴（player.weaponCatOverride）优先，其次局外存档
+function isStaveMode() {
+  try {
+    if (game && game.player && typeof game.player.weaponCatOverride === "number") return game.player.weaponCatOverride === 1;
+  } catch (e) {}
+  return SaveSystem.data.weaponCat === 1;
+}
 
 // ── 图鉴系统（收集进度）──
 const CODEX_MONSTERS = [
@@ -2035,6 +2079,8 @@ const SaveSystem = {
         talents: { ...DEFAULTS.talents, ...(parsed.talents || {}) },
         weaponSkin: parsed.weaponSkin || 0,
         weaponCat: parsed.weaponCat || 0,
+        // 老档迁移：weaponSkin≥1 的弓视为已拥有；法杖默认只有 0
+        weaponOwn: (parsed.weaponOwn && Array.isArray(parsed.weaponOwn.bow)) ? parsed.weaponOwn : { bow: Array.from({ length: (parsed.weaponSkin || 0) + 1 }, (_, i) => i), stave: Array.isArray(parsed.weaponOwn?.stave) ? parsed.weaponOwn.stave : [] },
         chapter: parsed.chapter || 1,
         bestWave: parsed.bestWave || 0,
         heroLevel: parsed.heroLevel || 1,
@@ -2443,25 +2489,33 @@ class Game {
       else if (slot === "hp") { const add = 15; this.player.maxHp = Math.min(240, this.player.maxHp + add); this.player.hp = Math.min(this.player.maxHp, this.player.hp + add); }
       else if (slot === "arrow") this.player.arrowCount = Math.min(3, this.player.arrowCount + 1);
     } else if (kind === "weapon") {
-      // 法杖路线：切换武器类型（弓→法杖），weaponSkin 0-3 共享
+      // 切换武器路线（弓↔法杖）：只切路线，不动装备/拥有状态
       if (slot === "cat") {
-        const newCat = 1 - s.weaponCat;
-        s.weaponCat = newCat;
+        s.weaponCat = 1 - s.weaponCat;
         SaveSystem.save();
-        // 切换后重新应用当前武器加成到玩家
-        if (this.player) {
-          // 简单做法：记录切换，下一局生效（当前局保留原武器属性，避免数值混乱）
-          this.flashMessage(newCat === 1 ? "已切换法杖路线（下一局生效）" : "已切换弓箭路线（下一局生效）");
-        }
-        codexUnlock("skins", "cat_" + newCat);
+        this.flashMessage(s.weaponCat === 1 ? "已切换法杖路线" : "已切换弓箭路线");
+        codexUnlock("skins", "cat_" + s.weaponCat);
         return true;
       }
-      if (s.weaponSkin >= slot) { s.weaponSkin = slot; SaveSystem.save(); }
-      else if (s.gold >= (isStaveMode() ? WEAPON_STAVES[slot].price : WEAPON_SKINS[slot].price)) {
-        s.gold -= (isStaveMode() ? WEAPON_STAVES[slot].price : WEAPON_SKINS[slot].price);
+      // 购买/装备当前路线武器：拥有状态按路线独立记录
+      const ownList = s.weaponCat === 1 ? s.weaponOwn.stave : s.weaponOwn.bow;
+      const price = (isStaveMode() ? WEAPON_STAVES[slot] : WEAPON_SKINS[slot]).price;
+      if (ownList.includes(slot)) {
+        // 已拥有：直接装备
         s.weaponSkin = slot;
         SaveSystem.save();
-      } else return false;
+        this.flashMessage("已装备");
+      } else if (s.gold >= price) {
+        s.gold -= price;
+        ownList.push(slot);
+        s.weaponSkin = slot;
+        SaveSystem.save();
+        this.flashMessage(`购买成功：${(isStaveMode() ? WEAPON_STAVES[slot] : WEAPON_SKINS[slot]).name}`);
+      } else {
+        this.flashMessage(`金币不足（需要 ${price}）`);
+        audio.death();
+        return false;
+      }
       // 图鉴解锁：武器皮肤
       codexUnlock("skins", String(slot));
     }
@@ -2646,6 +2700,12 @@ class Game {
       if (isStave) {
         a.vx *= 0.85; a.vy *= 0.85; // 能量球略慢
         if (st.bonus.elem === "volt") a.volt = Math.max(a.volt || 0, this.player.volt || 1);
+        // 法杖专属卡生效
+        a.damage *= 1 + (this.player.stavePower || 0) * 0.2; // 法力强化
+        a.pierce += this.player.stavePierce || 0;            // 奥术穿透
+        a.staveSplit = this.player.staveSplit || false;
+        a.staveNova = this.player.staveNova || false;
+        a.staveDrain = this.player.staveDrain || 0;
       }
       a.split = this.player.split;
       a.volt = this.player.volt;
@@ -3575,10 +3635,11 @@ function drawInRunShop(g, state) {
     });
     // 当前路线武器（4 款，88×46）
     const list = s.weaponCat === 1 ? WEAPON_STAVES : WEAPON_SKINS;
+    const ownList = s.weaponCat === 1 ? s.weaponOwn.stave : s.weaponOwn.bow;
     list.forEach((w, i) => {
       const wx = 120 + i * 92;
       const current = s.weaponSkin === i;
-      const owned = s.weaponSkin >= i;
+      const owned = ownList.includes(i);
       g.fillStyle = current ? "#2a2418" : "#1a2029";
       roundRect(g, wx, wy + 30, 82, 42, 8); g.fill();
       if (current) { g.strokeStyle = "#f7c948"; g.lineWidth = 2; roundRect(g, wx, wy + 30, 82, 42, 8); g.stroke(); }
