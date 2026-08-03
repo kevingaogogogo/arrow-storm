@@ -213,13 +213,18 @@ class Particle {
     g.save();
     g.globalAlpha = a;
     if (this.text) {
+      // 伤害数字：弹出缩放 + 上浮
+      const popScale = this.crit ? 1.6 : 1.35;
+      const sc = popScale - (popScale - 1) * Util.clamp(1 - a, 0, 1);
+      g.translate(this.x, this.y);
+      g.scale(sc, sc);
       g.font = `${this.crit ? 30 : 21}px Microsoft YaHei, sans-serif`;
       g.textAlign = "center";
       g.lineWidth = this.crit ? 5 : 3;
       g.strokeStyle = "rgba(61,30,7,0.85)";
       g.fillStyle = this.crit ? "#ffd56a" : this.color;
-      g.strokeText(this.text, this.x, this.y);
-      g.fillText(this.text, this.x, this.y);
+      g.strokeText(this.text, 0, 0);
+      g.fillText(this.text, 0, 0);
     } else {
       g.fillStyle = this.color;
       g.beginPath();
@@ -268,6 +273,8 @@ class Arrow {
       if (!this.active || e.dead || this.hitIds.has(e.id)) continue;
       if (Util.circleHit(this, e)) {
         this.hitIds.add(e.id);
+        // 命中顿帧：每次命中微停 30ms，营造打击重量
+        game.hitStop = Math.max(game.hitStop || 0, 0.03);
         const crit = Math.random() < this.critChance;
         const dmg = this.damage * (crit ? 2 : 1);
         e.takeDamage(dmg, crit, game, this.fire, this.ice);
@@ -379,6 +386,7 @@ class Enemy {
     this.iceT = 0;
     this.drift = Util.rand(-1, 1);
     this.isBoss = type === "boss";
+    this.hitFlash = 0;
     // 章节加成：最高波数每 10 波为一章，敌人变强
     const chapBonus = 1 + Math.floor((SaveSystem.data.bestWave || 0) / 10) * 0.15;
     const hp = { minion: 20, archer: 30, tank: 80, flyer: 25, boss: 600 + wave * 250 }[type];
@@ -390,6 +398,7 @@ class Enemy {
   }
   takeDamage(amount, crit, game, fire, ice) {
     this.hp -= amount;
+    this.hitFlash = 0.08; // 受击白闪
     if (fire) this.fireT = 3;
     if (ice) this.iceT = 2.5;
     game.damageNumber(this.x, this.y - this.r - 12, Math.round(amount), crit);
@@ -406,6 +415,13 @@ class Enemy {
     this.active = false;
     game.kills += 1;
     game.score += this.isBoss ? CONFIG.BOSS_SCORE : CONFIG.ENEMY_SCORE;
+    // Boss 击杀：慢镜 + 重震屏
+    if (this.isBoss) {
+      game.slowMo = 0.6;
+      game.shake = Math.max(game.shake || 0, 18);
+    } else {
+      game.shake = Math.max(game.shake || 0, 3.5);
+    }
     // 金币掉落：随波次轻微递增
     const base = this.isBoss ? 40 : { minion: 2, archer: 3, tank: 5, flyer: 3 }[this.type] || 2;
     const gold = Math.round(base * (1 + game.wave * 0.03));
@@ -421,6 +437,7 @@ class Enemy {
   }
   update(dt, game) {
     this.t += dt;
+    if (this.hitFlash > 0) this.hitFlash -= dt;
     const scroll = game.flySpeed * dt;
     this.y += scroll;
     if (this.fireT > 0) {
@@ -499,6 +516,15 @@ class Enemy {
     else if (this.type === "archer") drawArcher(g);
     else if (this.type === "flyer") drawFlyer(g, this.t);
     else drawMinion(g);
+    // 受击白闪叠加
+    if (this.hitFlash > 0) {
+      g.globalAlpha = Util.clamp(this.hitFlash / 0.08, 0, 1) * 0.85;
+      g.fillStyle = "#ffffff";
+      g.beginPath();
+      g.arc(0, 0, this.r * 1.1, 0, TAU);
+      g.fill();
+      g.globalAlpha = 1;
+    }
     g.restore();
     if (!this.isBoss) {
       drawSmallHp(g, this.x, this.y - this.r * s - 16, 48, this.hp / this.maxHp);
@@ -661,6 +687,12 @@ class Player {
     this.knockY *= Math.pow(0.05, dt);
     this.x = Util.clamp(this.x, 60, CONFIG.W - 60);
     this.y = Util.clamp(this.y, CONFIG.H * 0.73, CONFIG.H * 0.88);
+    // 移动拖尾：横移时留下紫色尾迹
+    const moveSpeed = Math.abs(this.x - (this.lastX || this.x)) / Math.max(0.001, dt);
+    if (moveSpeed > 120 && Math.random() < 0.5) {
+      game.particles.get(this.x, this.y + 8, Util.rand(-12, 12), Util.rand(-30, 30), 0.35, "rgba(168,101,255,0.5)", Util.rand(2, 4));
+    }
+    this.lastX = this.x;
     if (this.inv > 0) this.inv -= dt;
     if (this.regen > 0) this.hp = Math.min(this.maxHp, this.hp + this.regen * dt);
     this.fireT -= dt;
@@ -675,6 +707,14 @@ class Player {
     drawShadow(g, this.x, this.y + 18, 28, 10, 0.4);
     if (flash) return;
     g.save();
+    // 强度光环：箭数越多光环越大（成长可视化）
+    const haloR = 26 + this.arrowCount * 3 + this.swords.length * 4;
+    const haloA = 0.25 + Math.sin(performance.now() * 0.004) * 0.08;
+    g.strokeStyle = `rgba(168,101,255,${haloA})`;
+    g.lineWidth = 2.5;
+    g.beginPath();
+    g.arc(this.x, this.y, haloR, 0, TAU);
+    g.stroke();
     g.shadowBlur = 28;
     g.shadowColor = CONFIG.COLORS.purple;
     const grad = g.createRadialGradient(this.x - 6, this.y - 8, 4, this.x, this.y, 26);
@@ -893,6 +933,10 @@ class Game {
     this.factionAwakened = {};
     this.awakenMsg = "";
     this.awakenT = 0;
+    this.hitStop = 0;
+    this.slowMo = 0;
+    this.hpGhost = 100;
+    this.bossIntro = 0;
     this.decor.length = 0;
     this.leaves.length = 0;
     for (let i = 0; i < 38; i++) this.decor.push(this.makeDecor(Util.rand(0, CONFIG.H), Math.random() < 0.58 ? "tree" : Math.random() < 0.78 ? "rock" : "fence"));
@@ -928,11 +972,21 @@ class Game {
     return CONFIG.BASE_FLY_SPEED * (1 + this.flyBonus);
   }
   update(dt) {
+    // 时间缩放：命中顿帧 / 击杀慢镜
+    if (this.hitStop > 0) {
+      this.hitStop -= dt;
+      dt *= this.hitStop > 0.02 ? 0.06 : 0.4;
+    }
+    if (this.slowMo > 0) {
+      this.slowMo -= dt;
+      dt *= 0.35;
+    }
     if (this.state !== "PLAY") {
       this.updateBackdrop(dt);
       for (const p of this.particles.active()) p.update(dt);
       if (this.chooseT > 0) this.chooseT -= dt;
       if (this.awakenT > 0) this.awakenT -= dt;
+      if (this.bossIntro > 0) this.bossIntro -= dt;
       return;
     }
     this.flySpeed = this.getFlySpeed();
@@ -953,6 +1007,7 @@ class Game {
       this.ring.life -= dt;
       if (this.ring.life <= 0) this.ring = null;
     }
+    if (this.bossIntro > 0) this.bossIntro -= dt;
     if (this.shake > 0) this.shake = Math.max(0, this.shake - dt * 26);
     if (this.messageT > 0) this.messageT -= dt;
   }
@@ -987,6 +1042,9 @@ class Game {
       this.boss = this.enemies.get("boss", CONFIG.W / 2, -95, this.wave);
       audio.boss();
       this.flashMessage(`第 ${this.wave} 波 BOSS`);
+      // Boss 出场演出：暗幕 + 震屏 + 顶部红光
+      this.bossIntro = 1.2;
+      this.shake = Math.max(this.shake || 0, 10);
       return;
     }
     // 难度曲线：初期稀疏，随波次递增（1波2个 → 后期最多6个）
@@ -1087,6 +1145,11 @@ class Game {
       a.volt = this.player.volt;
       a.frostfire = this.player.frostfire;
     }
+    // 射击后座：玩家轻微下压 + 弓口火光粒子
+    this.player.knockY += 26;
+    for (let i = 0; i < 3; i++) {
+      this.particles.get(this.player.x + Util.rand(-6, 6), this.player.y - 40, Util.rand(-20, 20), Util.rand(-60, -20), 0.2, Util.pick(["#eadcff", "#a865ff"]), Util.rand(2, 4));
+    }
     audio.shoot();
   }
   damageNumber(x, y, amount, crit) {
@@ -1126,6 +1189,17 @@ class Game {
     // 三选一卡牌界面（画在最上层）
     if (this.state === "CHOOSE" && this.choices) {
       drawChoiceCards(g, this);
+    }
+    // Boss 出场演出：红色暗幕 + 顶部血光
+    if (this.bossIntro > 0) {
+      const a = Util.clamp(this.bossIntro / 1.2, 0, 1);
+      const grad = g.createLinearGradient(0, 0, 0, CONFIG.H * 0.5);
+      grad.addColorStop(0, `rgba(200,30,40,${0.4 * a})`);
+      grad.addColorStop(1, "rgba(200,30,40,0)");
+      g.fillStyle = grad;
+      g.fillRect(0, 0, CONFIG.W, CONFIG.H * 0.5);
+      g.fillStyle = `rgba(0,0,0,${0.35 * a})`;
+      g.fillRect(0, 0, CONFIG.W, CONFIG.H);
     }
     // 商店界面
     if (this.state === "SHOP") {
@@ -1197,6 +1271,19 @@ function drawWorld(g, state) {
   g.moveTo(CONFIG.W / 2 + CONFIG.ROAD_TOP_W / 2, 0);
   g.lineTo(CONFIG.W / 2 + CONFIG.ROAD_BOTTOM_W / 2, CONFIG.H);
   g.stroke();
+  // 道路动态光斑：随飞行流动的光影
+  g.save();
+  g.globalAlpha = 0.08;
+  for (let i = 0; i < 6; i++) {
+    const ly = ((i * 170 + state.distance * 3.2) % (CONFIG.H + 200)) - 100;
+    const lw = Util.roadWidth(ly) * 0.55;
+    const lx = CONFIG.W / 2 + Math.sin(i * 2.4 + state.distance * 0.004) * 40;
+    g.fillStyle = i % 2 ? "#ffe9c9" : "#c9b8ff";
+    g.beginPath();
+    g.ellipse(lx, ly, lw * 0.32, 16 + ly / CONFIG.H * 14, 0, 0, TAU);
+    g.fill();
+  }
+  g.restore();
   for (const d of [...state.decor].sort((a, b) => a.y - b.y)) drawDecor(g, d);
   drawLeaves(g, state.leaves);
 }
@@ -1453,6 +1540,17 @@ function drawChoiceCards(g, state) {
     g.fillStyle = rar.color;
     g.font = "bold 32px Microsoft YaHei, sans-serif";
     g.fillText(up.icon, 0, 86);
+    // 传说卡：金色粒子环绕（视觉稀缺性）
+    if (up.rarity === "legendary") {
+      const t = performance.now() * 0.004;
+      for (let k = 0; k < 6; k++) {
+        const ang = t + k * TAU / 6;
+        g.fillStyle = "rgba(247,201,72,0.8)";
+        g.beginPath();
+        g.arc(Math.cos(ang) * 52, 74 + Math.sin(ang) * 52 * 0.35, 2.5, 0, TAU);
+        g.fill();
+      }
+    }
     // 名称
     g.fillStyle = rar.color;
     g.font = "bold 22px Microsoft YaHei, sans-serif";
@@ -1645,10 +1743,23 @@ function drawHud(g, state) {
   g.save();
   g.fillStyle = "rgba(13,20,14,0.62)";
   roundRect(g, 14, 16, 178, 56, 8); g.fill();
+  // 受伤白条（延迟滑落）
+  const hpP = state.player.hp / state.player.maxHp;
+  const target = state.player.hp;
+  if (!state.hpGhost || state.hpGhost < target) state.hpGhost = target;
+  state.hpGhost = Math.max(target, state.hpGhost - 18 * (1 / 60));
+  const ghostP = state.hpGhost / state.player.maxHp;
   g.fillStyle = "#43202a";
   roundRect(g, 28, 31, 136, 14, 7); g.fill();
+  if (ghostP > hpP) {
+    g.fillStyle = "#ff9b6b";
+    roundRect(g, 28, 31, 136 * ghostP, 14, 7); g.fill();
+  }
   g.fillStyle = "#de5952";
-  roundRect(g, 28, 31, 136 * state.player.hp / state.player.maxHp, 14, 7); g.fill();
+  roundRect(g, 28, 31, 136 * hpP, 14, 7); g.fill();
+  // 血条光泽
+  g.fillStyle = "rgba(255,255,255,0.18)";
+  roundRect(g, 28, 31, 136 * hpP, 5, 3); g.fill();
   g.fillStyle = CONFIG.COLORS.ui;
   g.font = "14px Microsoft YaHei, sans-serif";
   g.fillText(`${Math.ceil(state.player.hp)}/${state.player.maxHp}`, 70, 62);
@@ -1696,15 +1807,23 @@ function drawMenu(g, state) {
   g.fillStyle = "rgba(7,12,8,0.62)";
   g.fillRect(0, 0, CONFIG.W, CONFIG.H);
   g.textAlign = "center";
-  g.shadowBlur = 24;
+  // 标题流光：呼吸光晕 + 渐变金字
+  const pulse = 0.5 + 0.5 * Math.sin(performance.now() * 0.003);
+  g.shadowBlur = 18 + 14 * pulse;
   g.shadowColor = CONFIG.COLORS.purple;
-  g.fillStyle = "#f8e9ff";
-  g.font = "bold 70px Microsoft YaHei, sans-serif";
+  const grad = g.createLinearGradient(0, 190, 0, 270);
+  grad.addColorStop(0, "#fff7ff");
+  grad.addColorStop(0.5, "#e0b8ff");
+  grad.addColorStop(1, "#a865ff");
+  g.fillStyle = grad;
+  g.font = "bold 76px Microsoft YaHei, sans-serif";
   g.fillText("箭雨", CONFIG.W / 2, 250);
-  g.shadowBlur = 0;
+  // 副标题流光
+  g.shadowBlur = 6 + 6 * pulse;
   g.fillStyle = "#d4c6af";
   g.font = "20px Microsoft YaHei, sans-serif";
   g.fillText("v2.1  自动飞行 · 三选一强化 · 流派觉醒", CONFIG.W / 2, 292);
+  g.shadowBlur = 0;
   drawButton(g, CONFIG.W / 2 - 105, 376, 210, 62, "开始");
   // 商店按钮 + 金币
   g.fillStyle = "rgba(168,101,255,0.18)";
