@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-  <title>箭雨 v3.27</title>
+  <title>箭雨 v3.28</title>
   <style>
     html, body {
       margin: 0;
@@ -50,8 +50,8 @@
   </style>
 </head>
 <body>
-  <canvas id="game" width="540" height="960" aria-label="箭雨 v3.27 游戏画布"></canvas>
-  <div id="landscapeBlocker">请旋转设备为竖屏<br>箭雨 v3.27 仅支持竖屏飞行</div>
+  <canvas id="game" width="540" height="960" aria-label="箭雨 v3.28 游戏画布"></canvas>
+  <div id="landscapeBlocker">请旋转设备为竖屏<br>箭雨 v3.28 仅支持竖屏飞行</div>
 <script>
 "use strict";
 
@@ -1201,7 +1201,13 @@ class Enemy {
         }
       } else if (this.eliteAffix === "splitter") {
         // 分裂怪：死亡前加速冲脸（为分裂制造压力）
-        chaseSpeed *= 1.2;
+        // ⚠️ 注意：chaseSpeed 是上面 if 块的块级 let 变量，这里引用会 ReferenceError
+        // 导致 rAF 主循环中断 = 游戏"卡住"（曾修过：v3.28 前的卡死根因）
+        const sdx = game.player.x - this.x, sdy = game.player.y - this.y;
+        const sd = Math.max(1, Math.hypot(sdx, sdy));
+        const spd = 160 * slow;
+        this.x += sdx / sd * spd * dt;
+        this.y += sdy / sd * spd * dt;
       }
     }
     if (this.isBoss) this.updateBoss(dt, game, slow);
@@ -4358,7 +4364,7 @@ function drawMenu(g, state) {
   g.shadowBlur = 6 + 6 * pulse;
   g.fillStyle = "#d4c6af";
   g.font = "20px Microsoft YaHei, sans-serif";
-  g.fillText("v3.27 · 房间闯关 · 排行榜 · 每日挑战", CONFIG.W / 2, 292);
+  g.fillText("v3.28 · 房间闯关 · 排行榜 · 每日挑战", CONFIG.W / 2, 292);
   g.fillStyle = "#ffe59a";
   g.font = "bold 18px Microsoft YaHei, sans-serif";
   g.fillText(Leaderboard.champion || "暂无王者", CONFIG.W / 2, 326);
@@ -4825,17 +4831,29 @@ canvas.addEventListener("pointercancel", () => { game.input.touching = false; ga
 
 let last = performance.now();
 let acc = 0;
+let lastErr = 0;
 function loop(now) {
-  const frame = Math.min(0.05, (now - last) / 1000);
-  last = now;
-  acc += frame;
-  while (acc >= CONFIG.FIXED_DT) {
-    game.update(CONFIG.FIXED_DT);
-    DemoAI.think(CONFIG.FIXED_DT);
-    acc -= CONFIG.FIXED_DT;
+  try {
+    const frame = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    acc += frame;
+    while (acc >= CONFIG.FIXED_DT) {
+      game.update(CONFIG.FIXED_DT);
+      DemoAI.think(CONFIG.FIXED_DT);
+      acc -= CONFIG.FIXED_DT;
+    }
+    game.render(ctx);
+    DemoAI.render(ctx);
+  } catch (e) {
+    // 保险：任何单帧异常都不允许中断主循环（否则游戏永久冻结=“房间卡住”）
+    // 记录错误但不冻结，下一帧继续
+    const now2 = performance.now();
+    if (now2 - lastErr > 3000 && typeof console !== "undefined") {
+      lastErr = now2;
+      console.error("[loop guard]", e);
+    }
+    last = now;
   }
-  game.render(ctx);
-  DemoAI.render(ctx);
   requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);
