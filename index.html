@@ -1227,6 +1227,93 @@ class Game {
 
 const game = new Game();
 
+// ── AI 演示模式（?demo=1）：游戏自己会玩，屏幕显示决策日志 ──
+const DEMO = new URLSearchParams(location.search).has("demo");
+const DemoAI = {
+  log: [],
+  lastLog: 0,
+  say(text) {
+    const now = performance.now();
+    if (now - this.lastLog < 600) return; // 限频
+    this.lastLog = now;
+    this.log.push({ t: now, text });
+    if (this.log.length > 5) this.log.shift();
+  },
+  think(dt) {
+    if (!DEMO) return;
+    if (game.state === "MENU" && !game._demoStarted) {
+      game._demoStarted = true;
+      game.start();
+      this.say("AI 演示模式启动，开始第一局");
+      return;
+    }
+    if (game.state === "CHOOSE" && game.choices) {
+      // 选卡策略：优先稀有度高，同稀有度随机
+      let best = 0;
+      for (let i = 1; i < game.choices.length; i++) {
+        if (RARITY[game.choices[i].rarity].weight > RARITY[game.choices[best].rarity].weight) best = i;
+      }
+      const picked = game.choices[best];
+      this.say(`选择：${picked.name}（${RARITY[picked.rarity].label}）`);
+      game.chooseUpgrade(best);
+      return;
+    }
+    if (game.state === "GAME_OVER") {
+      this.say(`本局结束：${Math.round(game.distance)}m，重启下一局`);
+      game.start();
+      return;
+    }
+    if (game.state !== "PLAY") return;
+    // 躲避策略：找最近的威胁（敌人/弹幕），横向避开；同时保持射程内
+    let threat = null, threatD = 999999;
+    const px = game.player.x, py = game.player.y;
+    const consider = (x, y) => {
+      const d = (x - px) * (x - px) + (y - py) * (y - py);
+      if (d < threatD && y > py - 420) { threatD = d; threat = { x, y }; }
+    };
+    for (const e of game.enemies.active()) if (!e.dead) consider(e.x, e.y);
+    for (const b of game.bullets.active()) consider(b.x, b.y);
+    if (game.chest) { // 优先吃宝箱
+      if (Math.abs(game.chest.x - px) > 20) {
+        game.input.left = game.chest.x < px ? 1 : 0;
+        game.input.right = game.chest.x > px ? 1 : 0;
+      } else { game.input.left = game.input.right = 0; }
+      return;
+    }
+    if (!threat) { game.input.left = game.input.right = 0; return; }
+    // 朝远离威胁的方向移动，但别出边界
+    const dir = threat.x > px ? -1 : 1;
+    if (px < 90 && dir < 0) { game.input.right = 0; game.input.left = 0; return; }
+    if (px > CONFIG.W - 90 && dir > 0) { game.input.right = 0; game.input.left = 0; return; }
+    game.input.left = dir < 0 ? 1 : 0;
+    game.input.right = dir > 0 ? 1 : 0;
+    // 偶尔记录移动决策（限频）
+    if (Math.random() < 0.006) this.say(dir < 0 ? "检测到威胁，向左闪避" : "检测到威胁，向右闪避");
+  },
+  render(g) {
+    if (!DEMO) return;
+    // 屏幕顶部 AI 决策日志
+    g.save();
+    g.fillStyle = "rgba(7,12,8,0.66)";
+    roundRect(g, 330, 118, 196, 118, 8); g.fill();
+    g.fillStyle = "#7cf8a8";
+    g.font = "bold 13px Microsoft YaHei, sans-serif";
+    g.textAlign = "left";
+    g.fillText("🤖 AI 演示", 342, 140);
+    g.font = "12px Microsoft YaHei, sans-serif";
+    const now = performance.now();
+    const rows = this.log.slice(-4);
+    rows.forEach((l, i) => {
+      const age = (now - l.t) / 1000;
+      g.globalAlpha = Math.max(0.25, 1 - age / 6);
+      g.fillStyle = "#d8e6f5";
+      g.fillText(l.text, 342, 162 + i * 18);
+    });
+    g.globalAlpha = 1;
+    g.restore();
+  }
+};
+
 function drawWorld(g, state) {
   const grad = g.createLinearGradient(0, 0, 0, CONFIG.H);
   grad.addColorStop(0, CONFIG.COLORS.grassFar);
@@ -2028,9 +2115,11 @@ function loop(now) {
   acc += frame;
   while (acc >= CONFIG.FIXED_DT) {
     game.update(CONFIG.FIXED_DT);
+    DemoAI.think(CONFIG.FIXED_DT);
     acc -= CONFIG.FIXED_DT;
   }
   game.render(ctx);
+  DemoAI.render(ctx);
   requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);
