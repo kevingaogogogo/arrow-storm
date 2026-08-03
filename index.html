@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-  <title>箭雨 v3.24</title>
+  <title>箭雨 v3.25</title>
   <style>
     html, body {
       margin: 0;
@@ -50,8 +50,8 @@
   </style>
 </head>
 <body>
-  <canvas id="game" width="540" height="960" aria-label="箭雨 v3.24 游戏画布"></canvas>
-  <div id="landscapeBlocker">请旋转设备为竖屏<br>箭雨 v3.24 仅支持竖屏飞行</div>
+  <canvas id="game" width="540" height="960" aria-label="箭雨 v3.25 游戏画布"></canvas>
+  <div id="landscapeBlocker">请旋转设备为竖屏<br>箭雨 v3.25 仅支持竖屏飞行</div>
 <script>
 "use strict";
 
@@ -1054,6 +1054,7 @@ class Enemy {
       for (let i = 0; i < 2; i++) {
         game.enemies.get("minion", this.x + (i ? 50 : -50), this.y + 20, game.wave);
       }
+      game.flashMessage("精英分裂成 2 个小兵！");
     }
     // 图鉴解锁：击杀记录怪物/Boss/精英词缀
     if (this.isBoss) codexUnlock("monsters", "boss_" + this.bossKind);
@@ -2081,7 +2082,11 @@ const HERO_TALENTS = [
   { id: "luck", name: "幸运", icon: "🍀", desc: "稀有卡概率 +3%/级", max: 20, color: "#8affc1" }
 ];
 // 升级所需经验曲线
-function heroExpNeed(level) { return Math.round(80 + level * 45); }
+// 升级经验曲线：前期快后期慢（天赋点获取随等级递减，局外成长线拉长）
+// Lv.N 升 N+1 需 80 + N×45 + max(0, N-5)×40 —— 5 级后明显变慢，防止过早点满 20 级天赋
+function heroExpNeed(level) {
+  return Math.round(80 + level * 45 + Math.max(0, level - 5) * 40);
+}
 // 结算经验：击杀+关卡推进
 function gainHeroExp(game, kills, chapter, roomIndex) {
   const base = kills * 4 + (chapter - 1) * 60 + roomIndex * 10;
@@ -2749,10 +2754,20 @@ class Game {
     for (let i = 0; i < 34; i++) this.particles.get(this.player.x, this.player.y, Util.rand(-160, 160), Util.rand(-200, 60), 0.75, Util.pick(["#f7c948", "#a865ff", "#fff1a5"]), Util.rand(3, 9));
   }
   spawnChest() {
-    this.chest = { x: CONFIG.W / 2, y: CONFIG.H * 0.73, r: 34 };
+    this.chest = { x: CONFIG.W / 2, y: CONFIG.H * 0.73, r: 34, pulse: 0 };
+    // 提示玩家吃宝箱（否则 Boss 房不出传送门会以为卡住）
+    this.flashMessage("拾取宝箱开启传送门！");
   }
   updateChest(dt) {
     if (!this.chest) return;
+    this.chest.pulse += dt;
+    // 宝箱磁吸：靠近 90px 自动飞向玩家（防漏吃卡在 Boss 房）
+    const dx = this.player.x - this.chest.x, dy = this.player.y - this.chest.y;
+    const d = Math.hypot(dx, dy);
+    if (d < 90 && d > 1) {
+      this.chest.x += dx / d * 320 * dt;
+      this.chest.y += dy / d * 320 * dt;
+    }
     this.chest.y += this.flySpeed * dt;
     if (Util.circleHit(this.player, this.chest)) {
       const reward = Util.randi(0, 2);
@@ -4425,7 +4440,7 @@ function drawMenu(g, state) {
   g.shadowBlur = 6 + 6 * pulse;
   g.fillStyle = "#d4c6af";
   g.font = "20px Microsoft YaHei, sans-serif";
-  g.fillText("v3.24 · 房间闯关 · 排行榜 · 每日挑战", CONFIG.W / 2, 292);
+  g.fillText("v3.25 · 房间闯关 · 排行榜 · 每日挑战", CONFIG.W / 2, 292);
   g.fillStyle = "#ffe59a";
   g.font = "bold 18px Microsoft YaHei, sans-serif";
   g.fillText(Leaderboard.champion || "暂无王者", CONFIG.W / 2, 326);
