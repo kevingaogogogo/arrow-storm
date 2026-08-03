@@ -3963,7 +3963,7 @@ function drawMenu(g, state) {
   g.shadowBlur = 6 + 6 * pulse;
   g.fillStyle = "#d4c6af";
   g.font = "20px Microsoft YaHei, sans-serif";
-  g.fillText("v3.11  房间闯关 · 全球排行榜 · 专属Boss · 每日挑战", CONFIG.W / 2, 292);
+  g.fillText("v3.11 · 房间闯关 · 排行榜 · 每日挑战", CONFIG.W / 2, 292);
   g.fillStyle = "#ffe59a";
   g.font = "bold 18px Microsoft YaHei, sans-serif";
   g.fillText(Leaderboard.champion || "暂无王者", CONFIG.W / 2, 326);
@@ -3971,49 +3971,49 @@ function drawMenu(g, state) {
   drawButton(g, CONFIG.W / 2 - 105, 376, 210, 62, "开始");
   // 每日挑战按钮
   g.fillStyle = "rgba(247,201,72,0.16)";
-  roundRect(g, CONFIG.W / 2 - 88, 452, 176, 40, 10); g.fill();
+  roundRect(g, CONFIG.W / 2 - 88, 452, 176, 42, 10); g.fill();
   g.strokeStyle = "rgba(247,201,72,0.5)";
   g.lineWidth = 2;
-  roundRect(g, CONFIG.W / 2 - 88, 452, 176, 40, 10); g.stroke();
+  roundRect(g, CONFIG.W / 2 - 88, 452, 176, 42, 10); g.stroke();
   g.fillStyle = "#f7c948";
   g.font = "bold 16px Microsoft YaHei, sans-serif";
-  g.fillText("每日挑战", CONFIG.W / 2, 478);
+  g.fillText("每日挑战", CONFIG.W / 2, 480);
   g.font = "11px Microsoft YaHei, sans-serif";
   g.fillStyle = "#d8b26a";
-  g.fillText("固定种子 · 禁用局外成长 · 公平竞技", CONFIG.W / 2, 494);
+  g.fillText("固定种子 · 禁用局外成长 · 公平竞技", CONFIG.W / 2, 512);
   // 英雄等级显示
   g.fillStyle = "#8affc1";
   g.font = "bold 15px Microsoft YaHei, sans-serif";
-  g.fillText(`英雄 Lv.${SaveSystem.data.heroLevel}  ${SaveSystem.data.heroPoints > 0 ? `⭐${SaveSystem.data.heroPoints} 点未分配` : ""}`, CONFIG.W / 2, 520);
+  g.fillText(`英雄 Lv.${SaveSystem.data.heroLevel}  ${SaveSystem.data.heroPoints > 0 ? `⭐${SaveSystem.data.heroPoints} 点未分配` : ""}`, CONFIG.W / 2, 546);
   // 天赋树按钮
   g.fillStyle = "rgba(138,255,193,0.16)";
-  roundRect(g, CONFIG.W / 2 - 88, 536, 176, 42, 10); g.fill();
+  roundRect(g, CONFIG.W / 2 - 88, 562, 176, 42, 10); g.fill();
   g.strokeStyle = "rgba(138,255,193,0.5)";
   g.lineWidth = 2;
-  roundRect(g, CONFIG.W / 2 - 88, 536, 176, 42, 10); g.stroke();
+  roundRect(g, CONFIG.W / 2 - 88, 562, 176, 42, 10); g.stroke();
   g.fillStyle = "#8affc1";
   g.font = "bold 17px Microsoft YaHei, sans-serif";
-  g.fillText("天赋树", CONFIG.W / 2, 564);
+  g.fillText("天赋树", CONFIG.W / 2, 590);
   // 永久金币显示（局内商店可用）+ 排行榜按钮
   g.fillStyle = "#f7c948";
   g.font = "bold 14px Microsoft YaHei, sans-serif";
-  g.fillText(`永久金币 ${SaveSystem.data.gold} 💰（局内商店可用）`, CONFIG.W / 2, 600);
+  g.fillText(`永久金币 ${SaveSystem.data.gold} 💰（局内商店可用）`, CONFIG.W / 2, 624);
   g.fillStyle = "rgba(168,101,255,0.18)";
-  roundRect(g, CONFIG.W / 2 - 88, 616, 176, 42, 10); g.fill();
+  roundRect(g, CONFIG.W / 2 - 88, 640, 176, 42, 10); g.fill();
   g.strokeStyle = "rgba(168,101,255,0.5)";
   g.lineWidth = 2;
-  roundRect(g, CONFIG.W / 2 - 88, 616, 176, 42, 10); g.stroke();
+  roundRect(g, CONFIG.W / 2 - 88, 640, 176, 42, 10); g.stroke();
   g.fillStyle = "#e8eef6";
   g.font = "bold 17px Microsoft YaHei, sans-serif";
-  g.fillText("排行榜", CONFIG.W / 2, 644);
+  g.fillText("排行榜", CONFIG.W / 2, 668);
   g.fillStyle = "#f1dfbf";
-  g.font = "16px Microsoft YaHei, sans-serif";
-  g.fillText(`最高进度：第 ${SaveSystem.data.chapter || 1} 章`, CONFIG.W / 2, 682);
+  g.font = "15px Microsoft YaHei, sans-serif";
+  g.fillText(`最高进度：第 ${SaveSystem.data.chapter || 1} 章`, CONFIG.W / 2, 706);
   const lines = ["←→ / AD / WASD 四向移动，触摸拖拽控制角色", "每章 6 房：战斗 · 商店 · 精英 · BOSS · 清房三选一", "右下角商店随时购买强化 · 英雄等级开天赋点"];
-  lines.forEach((line, i) => g.fillText(line, CONFIG.W / 2, 718 + i * 30));
+  lines.forEach((line, i) => g.fillText(line, CONFIG.W / 2, 742 + i * 30));
   g.fillStyle = "#a9977d";
   g.font = "14px Microsoft YaHei, sans-serif";
-  g.fillText(`音效：${audio.muted ? "关" : "开"}  点击左上角音符切换`, CONFIG.W / 2, 806);
+  g.fillText(`音效：${audio.muted ? "关" : "开"}  点击左上角音符切换`, CONFIG.W / 2, 842);
   g.restore();
 }
 
@@ -4277,9 +4277,9 @@ function activateAt(x, y) {
   }
   if (game.state === "MENU") {
     if (x >= CONFIG.W / 2 - 105 && x <= CONFIG.W / 2 + 105 && y >= 376 && y <= 438) game.start();
-    else if (x >= CONFIG.W / 2 - 88 && x <= CONFIG.W / 2 + 88 && y >= 452 && y <= 492) { game.enterDaily(); }
-    else if (x >= CONFIG.W / 2 - 88 && x <= CONFIG.W / 2 + 88 && y >= 536 && y <= 578) game.openHeroTree();
-    else if (x >= CONFIG.W / 2 - 88 && x <= CONFIG.W / 2 + 88 && y >= 616 && y <= 658) game.openLeaderboard();
+    else if (x >= CONFIG.W / 2 - 88 && x <= CONFIG.W / 2 + 88 && y >= 452 && y <= 494) { game.enterDaily(); }
+    else if (x >= CONFIG.W / 2 - 88 && x <= CONFIG.W / 2 + 88 && y >= 562 && y <= 604) game.openHeroTree();
+    else if (x >= CONFIG.W / 2 - 88 && x <= CONFIG.W / 2 + 88 && y >= 640 && y <= 682) game.openLeaderboard();
   } else if (game.state === "HERO") {
     // 返回
     if (x >= 210 && x <= 330 && y >= 882 && y <= 926) { game.closeHeroTree(); return; }
