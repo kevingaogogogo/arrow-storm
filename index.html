@@ -659,13 +659,18 @@ class Coin {
     this.vy = vy !== undefined ? vy : Util.rand(-90, -30);
     this.t = Util.rand(0, TAU);
     this.phase = Util.rand(0, TAU);
+    this.settleT = 0.5; // 出生弹跳后原地停留
   }
   update(dt, game) {
-    // 掉落抛物线 + 轻微漂浮
-    this.vy += 160 * dt;
-    this.x += this.vx * dt;
-    this.y += this.vy * dt;
     this.t += dt * 4;
+    // 落地停留：只在出生时短暂弹跳，之后原地漂浮（不丢失）
+    if (this.settleT > 0) {
+      this.settleT -= dt;
+      this.vy += 260 * dt;
+      this.x += this.vx * dt;
+      this.y += this.vy * dt;
+      if (this.settleT <= 0) { this.vx = 0; this.vy = 0; }
+    }
     // 磁吸：靠近玩家自动飞过去
     const p = game.player;
     const dx = p.x - this.x, dy = p.y - this.y;
@@ -681,8 +686,7 @@ class Coin {
         audio.coin();
       }
     }
-    // 掉落物滑出屏幕消失
-    if (this.y > CONFIG.H + 60 || this.y < -120) this.active = false;
+    // 不因下落丢失：金币永久停留在场景内
   }
   render(g) {
     g.save();
@@ -1820,6 +1824,13 @@ class Game {
     const alive = this.enemies.active().some(e => !e.dead);
     if (alive) return;
     this.roomCleared = true;
+    // 过关自动拾取：房间内所有剩余金币飞向玩家
+    for (const c of this.coins.active()) {
+      if (!c.active) continue;
+      game.runGold = (game.runGold || 0) + c.value;
+      c.active = false;
+      game.particles.get(c.x, c.y, Util.rand(-20, 20), Util.rand(-40, 10), 0.3, "#f7c948", Util.rand(2, 4));
+    }
     if (this.roomType === "battle" || this.roomType === "elite") {
       this.choices = rollChoices();
       this.state = "CHOOSE";
