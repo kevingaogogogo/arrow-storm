@@ -1286,6 +1286,7 @@ class Player {
     this.pierceAll = false;
     this.swords = [];
     this.inv = 0;
+    this.pickedUpgrades = [];
     this.fireT = 0;
     this.lastX = this.x;
     this.lastY = this.y;
@@ -1821,8 +1822,8 @@ class Game {
     this.distance = (this.chapter - 1) * 600 + this.roomIndex * 100;
     this.updateBackdrop(dt);
     this.updateInRunShop(dt);
-    // 局内商店打开时暂停战斗（只更新玩家/粒子/商店）
-    if (this.inRunShop && this.inRunShop.paused) {
+    // 局内商店/数值面板打开时暂停战斗（只更新玩家/粒子）
+    if ((this.inRunShop && this.inRunShop.paused) || this.statsPanel) {
       for (const p of this.particles.active()) p.update(dt);
       return;
     }
@@ -1946,6 +1947,13 @@ class Game {
     }
     this.inRunShop.paused = true;
   }
+  openStatsPanel() {
+    if (this.state !== "PLAY") return;
+    this.statsPanel = true;
+  }
+  closeStatsPanel() {
+    this.statsPanel = false;
+  }
   closeInRunShop() {
     if (this.inRunShop) this.inRunShop.paused = false;
   }
@@ -2058,12 +2066,17 @@ class Game {
     this.runGold -= item.price;
     item.sold = true;
     item.apply(this);
+    if (!this.player.pickedUpgrades) this.player.pickedUpgrades = [];
+    this.player.pickedUpgrades.push({ id: item.id, name: item.name, icon: item.icon, rarity: "shop", faction: "shop" });
     this.flashMessage(`${item.name}：购买成功`);
     audio.upgrade();
     return true;
   }
   applyUpgrade(up) {
     up.apply(this);
+    // 记录已选技能卡（详细面板展示）
+    if (!this.player.pickedUpgrades) this.player.pickedUpgrades = [];
+    this.player.pickedUpgrades.push({ id: up.id, name: up.name, icon: up.icon, rarity: up.rarity, faction: up.faction });
     // 流派计数 + 觉醒检测（每选 3 个同系触发）
     this.factionCount[up.faction] = (this.factionCount[up.faction] || 0) + 1;
     if (this.factionCount[up.faction] % 3 === 0 && !this.factionAwakened[up.faction]) {
@@ -3279,6 +3292,101 @@ function drawChest(g, c) {
   g.restore();
 }
 
+function drawStatsPanel(g, state) {
+  const p = state.player;
+  g.save();
+  g.fillStyle = "rgba(9,13,16,0.85)";
+  g.fillRect(0, 0, CONFIG.W, CONFIG.H);
+  g.textAlign = "center";
+  g.fillStyle = "#fff0c4";
+  g.font = "bold 34px Microsoft YaHei, sans-serif";
+  g.fillText("属性面板", CONFIG.W / 2, 76);
+  // 基础属性（两列）
+  const rows = [
+    ["攻击", Math.round(p.damage), "#ffd56a"],
+    ["射速", p.fireRate.toFixed(2) + "/秒", "#7fe0ff"],
+    ["暴击", Math.round(p.crit * 100) + "%", "#ff9ecb"],
+    ["穿透", p.pierce + " 次", "#c77dff"],
+    ["箭矢", p.arrowCount + " 支", "#8affc1"],
+    ["射程", Math.round(p.range) + " px", "#ffb15b"],
+    ["护盾", (p.shield || 0) + " 层", "#7fe0ff"],
+    ["生命", p.maxHp, "#ff6b81"]
+  ];
+  rows.forEach((r, i) => {
+    const col = i % 2;
+    const row = Math.floor(i / 2);
+    const x = 60 + col * 250;
+    const y = 128 + row * 40;
+    g.fillStyle = "#9aa5b4";
+    g.font = "15px Microsoft YaHei, sans-serif";
+    g.textAlign = "left";
+    g.fillText(r[0], x, y);
+    g.fillStyle = r[2];
+    g.font = "bold 17px Microsoft YaHei, sans-serif";
+    g.fillText(String(r[1]), x + 90, y);
+  });
+  // 特殊机制
+  const mechs = [];
+  if (p.fire) mechs.push("🔥灼烧");
+  if (p.ice) mechs.push("❄减速");
+  if (p.split) mechs.push("➿分裂");
+  if (p.volt) mechs.push("⚡弹射");
+  if (p.frostfire) mechs.push("💥冰爆");
+  if (p.homing) mechs.push("🎯追踪");
+  if (p.pierceAll) mechs.push("🗡贯穿");
+  if (p.lifesteal) mechs.push("🩸吸血");
+  if (p.orb) mechs.push("🌀火球");
+  if (p.regen) mechs.push("💚再生");
+  if (p.elemBoost > 1) mechs.push("🔮元素×" + p.elemBoost.toFixed(1));
+  if (p.burnMult) mechs.push("🔥灼烧×" + p.burnMult.toFixed(1));
+  if (p.slowMult) mechs.push("❄减速×" + p.slowMult.toFixed(1));
+  g.textAlign = "left";
+  g.fillStyle = "#9aa5b4";
+  g.font = "14px Microsoft YaHei, sans-serif";
+  g.fillText("特殊机制：" + (mechs.length ? mechs.join("  ") : "无"), 60, 272);
+  // 已选技能卡
+  g.textAlign = "center";
+  g.fillStyle = "#e8eef6";
+  g.font = "bold 20px Microsoft YaHei, sans-serif";
+  g.fillText(`已选技能（${(p.pickedUpgrades || []).length}）`, CONFIG.W / 2, 318);
+  const ups = p.pickedUpgrades || [];
+  const rarColor = { common: "#b8c4d0", rare: "#5fc6ff", epic: "#c77dff", legendary: "#f7c948", shop: "#ffd56a" };
+  const rarLabel = { common: "普通", rare: "稀有", epic: "史诗", legendary: "传说", shop: "商店" };
+  if (ups.length === 0) {
+    g.fillStyle = "#8a94a3";
+    g.font = "15px Microsoft YaHei, sans-serif";
+    g.fillText("还没有选择技能，清房后三选一获取", CONFIG.W / 2, 360);
+  } else {
+    ups.forEach((up, i) => {
+      const col = i % 4;
+      const row = Math.floor(i / 4);
+      const x = 76 + col * 112;
+      const y = 344 + row * 96;
+      const c = rarColor[up.rarity] || "#b8c4d0";
+      g.fillStyle = "rgba(0,0,0,0.4)";
+      roundRect(g, x - 40, y - 12, 92, 74, 8); g.fill();
+      g.strokeStyle = c;
+      g.lineWidth = 2;
+      roundRect(g, x - 40, y - 12, 92, 74, 8); g.stroke();
+      g.fillStyle = c;
+      g.font = "bold 20px Microsoft YaHei, sans-serif";
+      g.fillText(up.icon, x, y + 12);
+      g.font = "bold 12px Microsoft YaHei, sans-serif";
+      g.fillText(up.name, x, y + 36);
+      g.fillStyle = "#8a94a3";
+      g.font = "10px Microsoft YaHei, sans-serif";
+      g.fillText(rarLabel[up.rarity] || "", x, y + 52);
+    });
+  }
+  // 关闭按钮
+  g.fillStyle = "rgba(255,255,255,0.14)";
+  roundRect(g, CONFIG.W / 2 - 60, 880, 120, 44, 10); g.fill();
+  g.fillStyle = "#e8eef6";
+  g.font = "bold 18px Microsoft YaHei, sans-serif";
+  g.fillText("关闭", CONFIG.W / 2, 910);
+  g.restore();
+}
+
 function drawUI(g, state) {
   if (state.state === "PLAY") drawHud(g, state);
   if (state.messageT > 0) {
@@ -3293,6 +3401,7 @@ function drawUI(g, state) {
     g.fillText(state.message, CONFIG.W / 2, 154);
     g.restore();
   }
+  if (state.statsPanel) drawStatsPanel(g, state);
   if (state.state === "MENU") drawMenu(g, state);
   if (state.state === "LEADERBOARD") drawLeaderboard(g, state);
   if (state.state === "GAME_OVER") drawGameOver(g, state);
@@ -3333,6 +3442,38 @@ function drawHud(g, state) {
   g.fillText(`御剑 ${state.player.swords.length}/3${state.player.shield > 0 ? `  盾${state.player.shield}` : ""}`, 510, 90);
   g.fillStyle = "#f7c948";
   g.fillText(`💰${state.runGold || 0}`, 96, 108);
+  // 常驻基础数值条（左下角，紧凑不挡战斗视线）
+  const p = state.player;
+  g.fillStyle = "rgba(13,20,14,0.55)";
+  roundRect(g, 14, CONFIG.H - 52, 200, 38, 8); g.fill();
+  g.textAlign = "left";
+  g.font = "bold 13px Microsoft YaHei, sans-serif";
+  g.fillStyle = "#ffd56a";
+  g.fillText(`伤${Math.round(p.damage)}`, 24, CONFIG.H - 30);
+  g.fillStyle = "#7fe0ff";
+  g.fillText(`速${p.fireRate.toFixed(1)}`, 74, CONFIG.H - 30);
+  g.fillStyle = "#ff9ecb";
+  g.fillText(`暴${Math.round(p.crit * 100)}%`, 124, CONFIG.H - 30);
+  g.fillStyle = "#c77dff";
+  g.fillText(`穿${p.pierce}`, 174, CONFIG.H - 30);
+  g.fillStyle = "#8affc1";
+  g.font = "12px Microsoft YaHei, sans-serif";
+  g.fillText(`箭${p.arrowCount}${p.homing ? "·追" : ""}${p.pierceAll ? "·贯" : ""}${p.split ? "·裂" : ""}`, 24, CONFIG.H - 12);
+  g.fillStyle = "#7fe0ff";
+  g.fillText(`盾${p.shield || 0}`, 104, CONFIG.H - 12);
+  g.fillStyle = "#ffb15b";
+  g.fillText(`御剑${p.swords.length}/3`, 150, CONFIG.H - 12);
+  // 详细面板按钮（右上角，📊）
+  g.fillStyle = "rgba(168,101,255,0.2)";
+  roundRect(g, CONFIG.W - 40, 16, 30, 30, 8); g.fill();
+  g.strokeStyle = "rgba(168,101,255,0.5)";
+  g.lineWidth = 2;
+  roundRect(g, CONFIG.W - 40, 16, 30, 30, 8); g.stroke();
+  g.fillStyle = "#c77dff";
+  g.font = "bold 16px Microsoft YaHei, sans-serif";
+  g.textAlign = "center";
+  g.fillText("📊", CONFIG.W - 25, 37);
+  g.textAlign = "right";
   // 局内商店入口按钮（战斗中随时可花金币强化）
   g.fillStyle = "rgba(247,201,72,0.2)";
   roundRect(g, CONFIG.W - 92, CONFIG.H - 66, 78, 50, 10); g.fill();
@@ -3598,10 +3739,22 @@ function activateAt(x, y) {
     }
     return;
   }
-  if (game.state === "PLAY" && !game.inRunShop) {
+  if (game.state === "PLAY" && !game.inRunShop && !game.statsPanel) {
     // 局内商店入口按钮（右下角）
     if (x >= CONFIG.W - 92 && x <= CONFIG.W - 14 && y >= CONFIG.H - 66 && y <= CONFIG.H - 16) {
       game.openInRunShop();
+      return;
+    }
+    // 详细面板按钮（右上角 📊）
+    if (x >= CONFIG.W - 40 && x <= CONFIG.W - 10 && y >= 16 && y <= 46) {
+      game.openStatsPanel();
+      return;
+    }
+  }
+  if (game.state === "PLAY" && game.statsPanel) {
+    // 关闭面板
+    if (x >= CONFIG.W / 2 - 60 && x <= CONFIG.W / 2 + 60 && y >= 880 && y <= 924) {
+      game.closeStatsPanel();
       return;
     }
   }
@@ -3763,6 +3916,7 @@ window.addEventListener("keydown", e => {
     if (game.state === "MENU" || game.state === "GAME_OVER") game.start();
   }
   if (e.key === "Escape" && game.state === "LEADERBOARD") game.closeLeaderboard();
+  if (e.key === "Escape" && game.statsPanel) game.closeStatsPanel();
   if (e.key === "m" || e.key === "M") audio.toggle();
 });
 window.addEventListener("keyup", e => {
