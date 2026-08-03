@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-  <title>箭雨 v3.35</title>
+  <title>箭雨 v3.36</title>
   <style>
     html, body {
       margin: 0;
@@ -50,8 +50,8 @@
   </style>
 </head>
 <body>
-  <canvas id="game" width="540" height="960" aria-label="箭雨 v3.35 游戏画布"></canvas>
-  <div id="landscapeBlocker">请旋转设备为竖屏<br>箭雨 v3.35 仅支持竖屏飞行</div>
+  <canvas id="game" width="540" height="960" aria-label="箭雨 v3.36 游戏画布"></canvas>
+  <div id="landscapeBlocker">请旋转设备为竖屏<br>箭雨 v3.36 仅支持竖屏飞行</div>
 <script>
 "use strict";
 
@@ -1096,7 +1096,7 @@ class Enemy {
       const dy = game.player.y - this.y;
       const d = Math.max(1, Math.hypot(dx, dy));
       // 冲刺怪（小兵/精英swift）加速冲脸，其他缓慢逼近
-      // v3.35: 移速随章节缩放——第1章慢(×0.85)后期快(×1.1)，初始章节不再瞬追
+      // v3.36: 移速随章节缩放——第1章慢(×0.85)后期快(×1.1)，初始章节不再瞬追
       const ch = (game.chapter || 1);
       const chSpd = 0.85 + ch * 0.05;
       const chase = (this.type === "minion" ? (this.isElite ? 140 : 100)
@@ -1208,7 +1208,7 @@ class Enemy {
       } else if (this.eliteAffix === "splitter") {
         // 分裂怪：死亡前加速冲脸（为分裂制造压力）
         // ⚠️ 注意：chaseSpeed 是上面 if 块的块级 let 变量，这里引用会 ReferenceError
-        // 导致 rAF 主循环中断 = 游戏"卡住"（曾修过：v3.35 前的卡死根因）
+        // 导致 rAF 主循环中断 = 游戏"卡住"（曾修过：v3.36 前的卡死根因）
         const sdx = game.player.x - this.x, sdy = game.player.y - this.y;
         const sd = Math.max(1, Math.hypot(sdx, sdy));
         const spd = 160 * (0.85 + (game.chapter || 1) * 0.05) * slow; // 随章节缩放
@@ -1219,7 +1219,7 @@ class Enemy {
     if (this.isBoss) this.updateBoss(dt, game, slow);
     if (this.y > CONFIG.H + this.r + 80) this.active = false;
     if (!this.dead && game.player.canBeHit() && Util.circleHit(this, game.player)) {
-      // 碰撞伤害随章节成长（v3.35: 前期温和 13+ch×2，第1章15 可挨3下）
+      // 碰撞伤害随章节成长（v3.36: 前期温和 13+ch×2，第1章15 可挨3下）
       const hitDmg = 13 + (game.chapter || 1) * 2;
       game.player.hurt(hitDmg, game, Math.sign(game.player.x - this.x) * 90, 50);
     }
@@ -1250,7 +1250,7 @@ class Enemy {
     }
     const enrageMult = enrage ? 1.5 : 1;
     // 逼近速度：保持中距压制（太近会退，太远会追）——x/y 同时逼近
-    // v3.35: 狂暴追速 1.25→1.5，压迫感更强
+    // v3.36: 狂暴追速 1.25→1.5，压迫感更强
     const chaseSpeed = 70 * slow * (enrage ? 1.5 : 1);
     this.x += dx / d * chaseSpeed * dt;
     this.y += dy / d * chaseSpeed * 0.8 * dt;
@@ -1258,14 +1258,14 @@ class Enemy {
     this.rushT -= dt;
     if (this.rushT <= 0) {
       this.rushT = (enrage ? 1.5 : 3.2) + Util.rand(0, 1.2);
-      this.rushing = 1.5; // v3.35: 1.1→1.5s，冲锋距离拉长 36%
+      this.rushing = 1.5; // v3.36: 1.1→1.5s，冲锋距离拉长 36%
       this.rushDirX = dx / d;
       this.rushDirY = dy / d;
       audio.boss();
     }
     if (this.rushing > 0) {
       this.rushing -= dt;
-      const rushSpd = 300 * (enrage ? 1.3 : 1); // v3.35: 240→300
+      const rushSpd = 300 * (enrage ? 1.3 : 1); // v3.36: 240→300
       this.x += this.rushDirX * rushSpd * dt;
       this.y += this.rushDirY * rushSpd * dt;
     }
@@ -1278,7 +1278,7 @@ class Enemy {
     // 多样化攻击：随机攻击顺序（不固定轮换，玩家无法背板）+ 专属 Zone 技能 40% 概率
     this.shootT -= dt;
     if (this.shootT <= 0) {
-      // 狂暴时攻击更密：普通攻击间隔乘 0.5（v3.35: 0.65→0.5，狂暴攻速翻倍体感明显）
+      // 狂暴时攻击更密：普通攻击间隔乘 0.5（v3.36: 0.65→0.5，狂暴攻速翻倍体感明显）
       const cdMult = enrage ? 0.5 : 1;
       // 45% 概率放专属地面技能（zone），否则随机普通攻击
       if (Math.random() < 0.45) {
@@ -1438,7 +1438,7 @@ class Enemy {
       g.shadowBlur = 18;
       g.shadowColor = CONFIG.COLORS.red;
     } else if (this.isBoss && this.hp < this.maxHp * 0.35) {
-      // 狂暴持续特效：红色发光 + 呼吸脉冲（v3.35 新增，狂暴体感明显）
+      // 狂暴持续特效：红色发光 + 呼吸脉冲（v3.36 新增，狂暴体感明显）
       const pulse = 0.5 + 0.5 * Math.sin(performance.now() * 0.012);
       g.shadowBlur = 26 + 14 * pulse;
       g.shadowColor = "#ff3b30";
@@ -1592,9 +1592,9 @@ class Sword {
       }
       if (best) {
         this.target = best;
-        this.cooldown = 0.9;
+        this.cooldown = 0.9 * (game.player.swordCd || 1); // 御剑极速卡降低攻击间隔
       } else {
-        this.cooldown = 0.35;
+        this.cooldown = 0.35 * (game.player.swordCd || 1);
       }
     }
     if (this.slashT > 0) this.slashT -= dt;
@@ -1640,7 +1640,7 @@ class Player {
     this.y = CONFIG.PLAYER_Y;
     this.r = CONFIG.PLAYER_R;
     this.hp = 50;
-    this.maxHp = 50; // v3.35: 40→50，前期容错（第1章碰撞15可挨3下）
+    this.maxHp = 50; // v3.36: 40→50，前期容错（第1章碰撞15可挨3下）
     this.moveSpeed = CONFIG.BASE_MOVE_SPEED;
     this.damage = CONFIG.BASE_ARROW_DAMAGE;
     this.fireRate = CONFIG.BASE_FIRE_RATE;
@@ -1657,6 +1657,7 @@ class Player {
     this.shield = 0;
     this.elemBoost = 1;
     this.summonBoost = 1;
+    this.swordCd = 1;      // 御剑攻击间隔倍率（1=0.9s，御剑极速卡降低）
     this.spirit = false;
     this.lifesteal = 0;
     this.orb = 0;
@@ -2010,6 +2011,7 @@ const UPGRADES = [
   // ── 召唤系新增 ──
   { id: "ricochet", name: "弹射剑", icon: "回", rarity: "epic", faction: "summon", desc: "御剑命中后弹射至附近敌人", max: 2, has: g => g.player.swords.length === 0 || g.player.ricochet >= 2, apply: g => { g.player.ricochet = (g.player.ricochet || 0) + 1; } },
   { id: "summonDmg", name: "御剑之力", icon: "御", rarity: "rare", faction: "summon", desc: "御剑伤害 +25%", max: 3, has: g => g.player.swords.length === 0 || g.player.summonBoost >= 1.75, apply: g => { g.player.summonBoost = Math.min(2.5, (g.player.summonBoost || 1) + 0.25); } },
+  { id: "swordCd", name: "御剑极速", icon: "极", rarity: "rare", faction: "summon", desc: "御剑攻击间隔 -15%（0.9s → 0.77s）", max: 3, has: g => g.player.swords.length === 0 || (g.player.swordCd || 1) <= 0.62, apply: g => { g.player.swordCd = Math.max(0.62, (g.player.swordCd || 1) * 0.85); } },
   { id: "phantom", name: "幻影剑", icon: "幻", rarity: "legendary", faction: "summon", desc: "御剑 +1（第 4 把，剑灵羁绊）", max: 1, has: g => g.player.swords.length === 0 || g.player.phantom, apply: g => { g.player.phantom = true; if (g.player.swords.length < 4) g.player.swords.push(new Sword(g.player.swords.length, g)); } },
   // ── 生存系新增 ──
   { id: "dodge", name: "闪避", icon: "闪", rarity: "rare", faction: "surv", desc: "闪避率 +10%", max: 3, has: g => g.player.dodge >= 0.3, apply: g => { g.player.dodge = Math.min(0.4, (g.player.dodge || 0) + 0.1); } },
@@ -3980,13 +3982,15 @@ function drawStatsPanel(g, state) {
     ["箭矢", p.arrowCount + " 支", "#8affc1"],
     ["射程", Math.round(p.range) + " px", "#ffb15b"],
     ["护盾", (p.shield || 0) + " 层", "#7fe0ff"],
-    ["生命", p.maxHp, "#ff6b81"]
+    ["生命", p.maxHp, "#ff6b81"],
+    ["御剑", p.swords.length + " 把", "#c77dff"],
+    ["御剑CD", Math.round((0.9 * (p.swordCd || 1)) * 100) / 100 + "s", "#c77dff"]
   ];
   rows.forEach((r, i) => {
     const col = i % 2;
     const row = Math.floor(i / 2);
     const x = 60 + col * 250;
-    const y = 118 + row * 36;
+    const y = 108 + row * 34;
     g.fillStyle = "#9aa5b4";
     g.font = "15px Microsoft YaHei, sans-serif";
     g.textAlign = "left";
@@ -4317,7 +4321,7 @@ function drawHud(g, state) {
   g.fillStyle = "#7fe0ff";
   g.fillText(`盾${p.shield || 0}`, 104, CONFIG.H - 12);
   g.fillStyle = "#ffb15b";
-  g.fillText(`御剑${p.swords.length}/3`, 150, CONFIG.H - 12);
+  g.fillText(`御剑${p.swords.length}${p.swords.length > 0 ? `·CD${Math.round((0.9 * (p.swordCd || 1)) * 100) / 100}` : ""}`, 150, CONFIG.H - 12);
   // 详细面板按钮（右上角，📊）
   g.fillStyle = "rgba(168,101,255,0.2)";
   roundRect(g, CONFIG.W - 40, 16, 30, 30, 8); g.fill();
@@ -4431,7 +4435,7 @@ function drawMenu(g, state) {
   g.shadowBlur = 6 + 6 * pulse;
   g.fillStyle = "#d4c6af";
   g.font = "20px Microsoft YaHei, sans-serif";
-  g.fillText("v3.35 · 房间闯关 · 排行榜 · 每日挑战", CONFIG.W / 2, 292);
+  g.fillText("v3.36 · 房间闯关 · 排行榜 · 每日挑战", CONFIG.W / 2, 292);
   g.fillStyle = "#ffe59a";
   g.font = "bold 18px Microsoft YaHei, sans-serif";
   g.fillText(Leaderboard.champion || "暂无王者", CONFIG.W / 2, 326);
