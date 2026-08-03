@@ -168,6 +168,7 @@ class AudioSystem {
   boss() { this.tone(110, 0.45, "sawtooth", 0.3, 0.55); }
   death() { this.tone(220, 0.5, "sawtooth", 0.25, 0.25); }
   sword() { this.tone(760, 0.08, "triangle", 0.12, 1.25); }
+  coin() { this.tone(1320, 0.05, "sine", 0.07, 1.9); }
 }
 
 const audio = new AudioSystem();
@@ -278,6 +279,11 @@ class Arrow {
         const crit = Math.random() < this.critChance;
         const dmg = this.damage * (crit ? 2 : 1);
         e.takeDamage(dmg, crit, game, this.fire, this.ice);
+        // 吸血：命中回复生命
+        if (this.lifesteal > 0) {
+          game.player.hp = Math.min(game.player.maxHp, game.player.hp + this.lifesteal);
+          if (Math.random() < 0.3) game.particles.get(game.player.x, game.player.y - 20, Util.rand(-10, 10), Util.rand(-40, -10), 0.4, "#ff6b81", Util.rand(2, 4));
+        }
         // 乘区联动 1：分裂箭 —— 命中生成 2 支小箭（30% 伤害）
         if (this.split) {
           for (const da of [-0.22, 0.22]) {
@@ -370,6 +376,60 @@ class Bullet {
   }
 }
 
+// 金币实体：掉落物，靠近玩家自动磁吸（弓箭传说式捡钱爽感）
+class Coin {
+  constructor() { this.active = false; }
+  init(x, y, value, vx, vy) {
+    this.active = true;
+    this.x = x; this.y = y;
+    this.value = value;
+    this.vx = vx !== undefined ? vx : Util.rand(-40, 40);
+    this.vy = vy !== undefined ? vy : Util.rand(-90, -30);
+    this.t = Util.rand(0, TAU);
+    this.phase = Util.rand(0, TAU);
+  }
+  update(dt, game) {
+    // 掉落抛物线 + 轻微漂浮
+    this.vy += 160 * dt;
+    this.x += this.vx * dt;
+    this.y += this.vy * dt;
+    this.t += dt * 4;
+    // 磁吸：靠近玩家自动飞过去
+    const p = game.player;
+    const dx = p.x - this.x, dy = p.y - this.y;
+    const d = Math.hypot(dx, dy);
+    if (d < 130) {
+      const pull = (1 - d / 130) * 520;
+      this.x += dx / d * pull * dt;
+      this.y += dy / d * pull * dt;
+      if (d < 24) {
+        this.active = false;
+        game.runGold = (game.runGold || 0) + this.value;
+        game.particles.get(this.x, this.y, Util.rand(-20, 20), Util.rand(-40, 10), 0.3, "#f7c948", Util.rand(2, 4));
+        audio.coin();
+      }
+    }
+    // 掉落物滑出屏幕消失
+    if (this.y > CONFIG.H + 60 || this.y < -120) this.active = false;
+  }
+  render(g) {
+    g.save();
+    const bob = Math.sin(this.t) * 3;
+    g.translate(this.x, this.y + bob);
+    g.shadowBlur = 10;
+    g.shadowColor = "#f7c948";
+    g.fillStyle = "#f7c948";
+    g.beginPath();
+    g.arc(0, 0, 5.5, 0, TAU);
+    g.fill();
+    g.fillStyle = "#fff1a8";
+    g.beginPath();
+    g.arc(0, 0, 3, 0, TAU);
+    g.fill();
+    g.restore();
+  }
+}
+
 let enemyId = 1;
 class Enemy {
   constructor() { this.active = false; }
@@ -387,14 +447,32 @@ class Enemy {
     this.drift = Util.rand(-1, 1);
     this.isBoss = type === "boss";
     this.hitFlash = 0;
-    // 章节加成：最高波数每 10 波为一章，敌人变强
+    // 精英怪：非 Boss 波 18% 概率，金色边框 + 词缀 + 5倍金币
+    this.isElite = !this.isBoss && Math.random() < 0.18 && wave >= 2;
+    this.eliteAffix = this.isElite ? Util.pick(["swift", "huge", "armored", "splitter"]) : null;
+    // 难度曲线：敌人 HP 随波次持续增长（每波 +5%），章节额外加成
     const chapBonus = 1 + Math.floor((SaveSystem.data.bestWave || 0) / 10) * 0.15;
-    const hp = { minion: 20, archer: 30, tank: 80, flyer: 25, boss: 600 + wave * 250 }[type];
-    this.hp = hp * chapBonus;
+    const waveBonus = 1 + (wave - 1) * 0.05;
+    let hp = { minion: 20, archer: 30, tank: 80, flyer: 25, boss: 600 + wave * 250 }[type] * chapBonus * waveBonus;
+    // 精英词缀加成
+    if (this.isElite) {
+      hp *= this.eliteAffix === "huge" ? 3.2 : this.eliteAffix === "armored" ? 2.4 : 1.7;
+      if (this.eliteAffix === "swift") this.drift = Util.rand(1.5, 2.5);
+    }
+    this.hp = Math.round(hp);
     this.maxHp = this.hp;
     this.r = this.isBoss ? 72 : type === "tank" ? 28 : 21;
+    if (this.isElite && this.eliteAffix === "huge") this.r *= 1.5;
     this.baseSpeed = type === "tank" ? 18 : type === "flyer" ? 22 : 0;
+    if (this.isElite && this.eliteAffix === "swift") this.baseSpeed = (this.baseSpeed || 26) + 40;
     this.bossRush = 0;
+    // Boss 多样化：按 Boss 序号轮换 3 种（第1个普通 / 第2个重装 / 第3个双头，循环）
+    this.bossKind = this.isBoss ? ["normal", "heavy", "twin"][(Math.floor(wave / 5) - 1 + 9) % 3] : null;
+    if (this.isBoss) {
+      if (this.bossKind === "heavy") this.hp = Math.round(this.hp * 1.6);
+      if (this.bossKind === "twin") this.hp = Math.round(this.hp * 0.85);
+      this.maxHp = this.hp;
+    }
   }
   takeDamage(amount, crit, game, fire, ice) {
     this.hp -= amount;
@@ -422,17 +500,26 @@ class Enemy {
     } else {
       game.shake = Math.max(game.shake || 0, 3.5);
     }
-    // 金币掉落：随波次轻微递增
+    // 金币掉落：生成金币实体（磁吸拾取），精英怪 5 倍
     const base = this.isBoss ? 40 : { minion: 2, archer: 3, tank: 5, flyer: 3 }[this.type] || 2;
-    const gold = Math.round(base * (1 + game.wave * 0.03));
-    game.runGold = (game.runGold || 0) + gold;
-    game.particles.get(this.x, this.y - this.r, Util.rand(-8, 8), -60, 0.8, "#f7c948", 1, `+${gold}`, false);
-    for (let i = 0; i < (this.isBoss ? 34 : 12); i++) {
-      game.particles.get(this.x, this.y, Util.rand(-130, 130), Util.rand(-180, 60), Util.rand(0.35, 0.9), this.isBoss ? "#f7c948" : "#d99a48", Util.rand(3, 10));
+    const total = Math.round(base * (1 + game.wave * 0.03) * (this.isElite ? 5 : 1));
+    // 拆成 1-3 枚金币掉落（更有捡钱感）
+    const nCoins = this.isBoss ? 5 : this.isElite ? 3 : Util.randi(1, 2);
+    for (let i = 0; i < nCoins; i++) {
+      game.coins.get(this.x + Util.rand(-14, 14), this.y + Util.rand(-10, 10), Math.max(1, Math.round(total / nCoins)), Util.rand(-60, 60), Util.rand(-140, -40));
+    }
+    for (let i = 0; i < (this.isBoss ? 34 : this.isElite ? 22 : 12); i++) {
+      game.particles.get(this.x, this.y, Util.rand(-130, 130), Util.rand(-180, 60), Util.rand(0.35, 0.9), this.isBoss || this.isElite ? "#f7c948" : "#d99a48", Util.rand(3, 10));
     }
     if (this.isBoss) {
       game.boss = null;
       game.spawnChest();
+    }
+    // 分裂词缀：精英死亡分裂成 2 个小兵
+    if (this.isElite && this.eliteAffix === "splitter") {
+      for (let i = 0; i < 2; i++) {
+        game.enemies.get("minion", this.x + (i ? 50 : -50), this.y + 20, game.wave);
+      }
     }
   }
   update(dt, game) {
@@ -480,14 +567,34 @@ class Enemy {
     this.y = Math.min(this.y + 18 * slow * dt, 190);
     this.shootT -= dt;
     if (this.shootT <= 0) {
-      this.shootT = 1.6;
-      for (let i = -2; i <= 2; i++) {
-        const a = Math.PI / 2 + i * 0.21 + Math.sin(this.t) * 0.1;
-        game.bullets.get(this.x, this.y + 35, Math.cos(a) * 185, Math.sin(a) * 185, 8, 10);
-      }
-      if (Math.random() < 0.35) {
-        const sx = Util.rand(CONFIG.W / 2 - 130, CONFIG.W / 2 + 130);
-        game.enemies.get("minion", sx, this.y + 85, game.wave);
+      // 重装 Boss：弹幕更密但间隔更长；双头 Boss：双轮扇形
+      if (this.bossKind === "heavy") {
+        this.shootT = 2.1;
+        for (let i = -3; i <= 3; i++) {
+          const a = Math.PI / 2 + i * 0.16 + Math.sin(this.t) * 0.1;
+          game.bullets.get(this.x, this.y + 35, Math.cos(a) * 150, Math.sin(a) * 150, 9, 12);
+        }
+        if (Math.random() < 0.5) game.enemies.get("tank", Util.rand(CONFIG.W / 2 - 110, CONFIG.W / 2 + 110), this.y + 85, game.wave);
+      } else if (this.bossKind === "twin") {
+        this.shootT = 1.1;
+        for (let k = 0; k < 2; k++) {
+          const ox = k ? 60 : -60;
+          for (let i = -1; i <= 1; i++) {
+            const a = Math.PI / 2 + i * 0.24 + Math.sin(this.t * 1.3 + k) * 0.15;
+            game.bullets.get(this.x + ox, this.y + 35, Math.cos(a) * 200, Math.sin(a) * 200, 6, 8);
+          }
+        }
+        if (Math.random() < 0.4) game.enemies.get("minion", Util.rand(CONFIG.W / 2 - 130, CONFIG.W / 2 + 130), this.y + 85, game.wave);
+      } else {
+        this.shootT = 1.6;
+        for (let i = -2; i <= 2; i++) {
+          const a = Math.PI / 2 + i * 0.21 + Math.sin(this.t) * 0.1;
+          game.bullets.get(this.x, this.y + 35, Math.cos(a) * 185, Math.sin(a) * 185, 8, 10);
+        }
+        if (Math.random() < 0.35) {
+          const sx = Util.rand(CONFIG.W / 2 - 130, CONFIG.W / 2 + 130);
+          game.enemies.get("minion", sx, this.y + 85, game.wave);
+        }
       }
       if (Math.random() < 0.18) this.bossRush = 0.45;
     }
@@ -516,6 +623,22 @@ class Enemy {
     else if (this.type === "archer") drawArcher(g);
     else if (this.type === "flyer") drawFlyer(g, this.t);
     else drawMinion(g);
+    // 精英怪：金色描边 + 词缀标记
+    if (this.isElite) {
+      g.strokeStyle = "#f7c948";
+      g.lineWidth = 3.5;
+      g.shadowBlur = 14;
+      g.shadowColor = "#f7c948";
+      g.beginPath();
+      g.arc(0, 0, this.r * 1.15, 0, TAU);
+      g.stroke();
+      g.shadowBlur = 0;
+      const affixLabel = { swift: "速", huge: "巨", armored: "甲", splitter: "裂" }[this.eliteAffix] || "精";
+      g.fillStyle = "#f7c948";
+      g.font = "bold 15px Microsoft YaHei, sans-serif";
+      g.textAlign = "center";
+      g.fillText(affixLabel, 0, -this.r * 1.15 - 6);
+    }
     // 受击白闪叠加
     if (this.hitFlash > 0) {
       g.globalAlpha = Util.clamp(this.hitFlash / 0.08, 0, 1) * 0.85;
@@ -653,6 +776,8 @@ class Player {
     this.elemBoost = 1;
     this.summonBoost = 1;
     this.spirit = false;
+    this.lifesteal = 0;
+    this.orb = 0;
     this.swords = [];
     this.inv = 0;
     this.fireT = 0;
@@ -701,6 +826,21 @@ class Player {
       game.fireArrows();
     }
     for (const sword of this.swords) sword.update(dt, game);
+    // 环绕火球：绕玩家旋转，触碰敌人灼烧
+    if (this.orb > 0) {
+      this.orbAngle = (this.orbAngle || 0) + dt * 4;
+      for (let k = 0; k < this.orb; k++) {
+        const ang = this.orbAngle + k * TAU / Math.max(1, this.orb);
+        const ox = this.x + Math.cos(ang) * 52;
+        const oy = this.y + Math.sin(ang) * 52 * 0.5;
+        for (const e of game.enemies.active()) {
+          if (e.dead) continue;
+          if (Math.hypot(e.x - ox, e.y - oy) < e.r + 12) {
+            e.takeDamage(4 * dt * 60 * 0.1, false, game, true, false);
+          }
+        }
+      }
+    }
   }
   render(g) {
     const flash = this.inv > 0 && Math.floor(this.inv * 16) % 2 === 0;
@@ -740,6 +880,26 @@ class Player {
     g.fill();
     g.restore();
     for (const sword of this.swords) sword.render(g);
+    // 环绕火球渲染
+    if (this.orb > 0) {
+      for (let k = 0; k < this.orb; k++) {
+        const ang = (this.orbAngle || 0) + k * TAU / Math.max(1, this.orb);
+        const ox = this.x + Math.cos(ang) * 52;
+        const oy = this.y + Math.sin(ang) * 52 * 0.5;
+        g.save();
+        g.shadowBlur = 14;
+        g.shadowColor = "#ff7b3d";
+        const og = g.createRadialGradient(ox - 2, oy - 2, 1, ox, oy, 10);
+        og.addColorStop(0, "#ffe3c2");
+        og.addColorStop(0.5, "#ff7b3d");
+        og.addColorStop(1, "#e54d3c");
+        g.fillStyle = og;
+        g.beginPath();
+        g.arc(ox, oy, 10, 0, TAU);
+        g.fill();
+        g.restore();
+      }
+    }
   }
 }
 
@@ -775,7 +935,10 @@ const UPGRADES = [
   { id: "speed", name: "横移", icon: "移", rarity: "common", faction: "surv", desc: "横移速度 +12%", max: 700, has: g => g.player.moveSpeed >= 700, apply: g => { g.player.moveSpeed = Math.min(700, g.player.moveSpeed * 1.12); } },
   { id: "range", name: "远射", icon: "射", rarity: "common", faction: "surv", desc: "射击距离 +12%", max: 1500, has: g => g.player.range >= 1500, apply: g => { g.player.range = Math.min(1500, g.player.range * 1.12); } },
   { id: "regen", name: "再生", icon: "愈", rarity: "rare", faction: "surv", desc: "每秒回复 2 生命", max: 1, has: g => g.player.regen > 0, apply: g => { g.player.regen = (g.player.regen || 0) + 2; } },
-  { id: "shield", name: "护盾", icon: "盾", rarity: "epic", faction: "surv", desc: "获得护盾，抵挡一次伤害", max: 3, has: g => g.player.shield >= 3, apply: g => { g.player.shield = (g.player.shield || 0) + 1; } }
+  { id: "shield", name: "护盾", icon: "盾", rarity: "epic", faction: "surv", desc: "获得护盾，抵挡一次伤害", max: 3, has: g => g.player.shield >= 3, apply: g => { g.player.shield = (g.player.shield || 0) + 1; } },
+  // ── 机制型（弓箭传说式）──
+  { id: "lifesteal", name: "吸血箭", icon: "吸", rarity: "epic", faction: "shot", desc: "命中回复 1.5 生命", max: 2, has: g => g.player.lifesteal >= 2, apply: g => { g.player.lifesteal = (g.player.lifesteal || 0) + 1.5; } },
+  { id: "orb", name: "环绕火球", icon: "环", rarity: "legendary", faction: "elem", desc: "火球环绕，触碰敌人灼烧", max: 1, has: g => g.player.orb > 0, apply: g => { g.player.orb = (g.player.orb || 0) + 1; } }
 ];
 
 // 流派觉醒：连选 3 个同系技能触发
@@ -857,8 +1020,8 @@ const SaveSystem = {
   },
   addGold(n) { this.data.gold = Math.max(0, Math.floor(this.data.gold + n)); this.save(); },
   // 装备/天赋价格：随等级递增
-  equipPrice(slot) { const lv = this.data.equip[slot]; return [80, 180, 380][lv] || 0; },
-  talentPrice(slot) { const lv = this.data.talents[slot]; return [100, 220, 450][lv] || 0; },
+  equipPrice(slot) { const lv = this.data.equip[slot]; return [60, 150, 320][lv] || 0; },
+  talentPrice(slot) { const lv = this.data.talents[slot]; return [80, 180, 380][lv] || 0; },
   canBuyEquip(slot) { return this.data.equip[slot] < 3 && this.data.gold >= this.equipPrice(slot); },
   canBuyTalent(slot) { return this.data.talents[slot] < 3 && this.data.gold >= this.talentPrice(slot); },
   buyEquip(slot) {
@@ -902,6 +1065,7 @@ class Game {
     this.arrows = new Pool(Arrow);
     this.enemies = new Pool(Enemy);
     this.bullets = new Pool(Bullet);
+    this.coins = new Pool(Coin);
     this.particles = new Pool(Particle);
     this.input = { left: 0, right: 0, touching: false, touchX: CONFIG.W / 2, hover: false, hoverX: CONFIG.W / 2 };
     this.state = "MENU";
@@ -951,6 +1115,7 @@ class Game {
     this.arrows.items.length = 0;
     this.enemies.items.length = 0;
     this.bullets.items.length = 0;
+    this.coins.items.length = 0;
     this.particles.items.length = 0;
     this.resetWorld();
     this.spawnWave();
@@ -999,6 +1164,7 @@ class Game {
     for (const a of this.arrows.active()) a.update(dt, this);
     for (const e of this.enemies.active()) e.update(dt, this);
     for (const b of this.bullets.active()) b.update(dt, this);
+    for (const c of this.coins.active()) c.update(dt, this);
     for (const p of this.particles.active()) p.update(dt);
     this.updateGate(dt);
     this.updateChest(dt);
@@ -1047,14 +1213,16 @@ class Game {
       this.shake = Math.max(this.shake || 0, 10);
       return;
     }
-    // 难度曲线：初期稀疏，随波次递增（1波2个 → 后期最多6个）
-    const count = Util.randi(2, 2 + Math.min(4, Math.floor(this.wave / 2)));
-    // 敌人类型按波次解锁：1-2波只有小兵，3波+射手，4波+坦克，2波+飞行怪
+    // 难度曲线：敌人数量随波次递增（1波2个 → 后期 4-8 个）
+    const count = Util.randi(2, 2 + Math.min(6, Math.floor(this.wave / 1.5)));
+    // 敌人类型按波次解锁：1波小兵，2波+飞行怪，3波+射手，4波+坦克，6波+更多坦克
     const types = [];
     types.push("minion");
     if (this.wave >= 2) types.push("flyer");
     if (this.wave >= 3) types.push("archer");
-    if (this.wave >= 4) types.push("tank", "minion");
+    if (this.wave >= 4) types.push("tank");
+    if (this.wave >= 6) types.push("tank", "archer");
+    if (this.wave >= 8) types.push("flyer", "tank");
     for (let i = 0; i < count; i++) {
       const y = -80 - i * Util.rand(58, 84);
       const roadW = Util.roadWidth(Math.max(40, y + CONFIG.H * 0.45));
@@ -1127,7 +1295,10 @@ class Game {
         this.flashMessage("宝箱：回复 40%");
       } else {
         this.score += 300;
-        this.runGold = (this.runGold || 0) + 60;
+        // 宝箱金币：洒出 6 枚金币实体
+        for (let i = 0; i < 6; i++) {
+          this.coins.get(this.chest.x + Util.rand(-30, 30), this.chest.y + Util.rand(-20, 20), 10, Util.rand(-90, 90), Util.rand(-180, -60));
+        }
         this.flashMessage("宝箱：金币 +60");
       }
       audio.chest();
@@ -1144,6 +1315,7 @@ class Game {
       a.split = this.player.split;
       a.volt = this.player.volt;
       a.frostfire = this.player.frostfire;
+      a.lifesteal = this.player.lifesteal;
     }
     // 射击后座：玩家轻微下压 + 弓口火光粒子
     this.player.knockY += 26;
@@ -1174,6 +1346,7 @@ class Game {
     for (const e of renderables) e.render(g);
     for (const a of this.arrows.active()) a.render(g);
     for (const b of this.bullets.active()) b.render(g);
+    for (const c of this.coins.active()) c.render(g);
     this.player.render(g);
     // 升级光圈（画在粒子下层）
     if (this.ring) {
@@ -1535,11 +1708,17 @@ function drawFlyer(g, t) {
 }
 
 function drawBoss(g, e) {
-  g.fillStyle = "#4c2632";
+  // 三种 Boss 配色：普通=红紫，重装=深蓝，双头=双色
+  const pal = e.bossKind === "heavy"
+    ? { body: "#26304c", arm: "#3b4a7b", eye: "#5fc6ff", crown: "#9fb8ff" }
+    : e.bossKind === "twin"
+    ? { body: "#4c2632", arm: "#7b3340", eye: "#ffd56a", crown: "#f1c45f" }
+    : { body: "#3c2440", arm: "#6a2f6a", eye: "#ff9b35", crown: "#f1c45f" };
+  g.fillStyle = pal.body;
   g.beginPath();
   g.arc(0, 0, 72, 0, TAU);
   g.fill();
-  g.fillStyle = "#7b3340";
+  g.fillStyle = pal.arm;
   g.beginPath();
   g.moveTo(-68, -16);
   g.lineTo(-112, 20);
@@ -1550,7 +1729,7 @@ function drawBoss(g, e) {
   g.lineTo(50, 32);
   g.closePath();
   g.fill();
-  g.fillStyle = "#f1c45f";
+  g.fillStyle = pal.crown;
   g.beginPath();
   g.moveTo(-26, -46);
   g.lineTo(-10, -78);
@@ -1559,9 +1738,14 @@ function drawBoss(g, e) {
   g.lineTo(28, -44);
   g.closePath();
   g.fill();
-  g.fillStyle = "#ff9b35";
+  g.fillStyle = pal.eye;
   g.fillRect(-32, -13, 18, 9);
   g.fillRect(14, -13, 18, 9);
+  // 双头 Boss：第二对眼睛
+  if (e.bossKind === "twin") {
+    g.fillRect(-32, -34, 18, 9);
+    g.fillRect(14, -34, 18, 9);
+  }
 }
 
 function drawSmallHp(g, x, y, w, p) {
