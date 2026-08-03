@@ -65,7 +65,7 @@ const CONFIG = {
   BASE_MOVE_SPEED: 320,
   BASE_FIRE_RATE: 2,
   BASE_ARROW_SPEED: 720,
-  BASE_ARROW_DAMAGE: 10,
+  BASE_ARROW_DAMAGE: 14,
   BASE_RANGE: 900,
   WAVE_LEN: 300,
   GATE_EVERY: 240,
@@ -96,6 +96,9 @@ const CONFIG = {
 const TAU = Math.PI * 2;
 const LEADERBOARD_ID = "019fc5b1-da1d-77b0-80c7-697b169f0d1c";
 const LEADERBOARD_CACHE_MS = 5 * 60 * 1000;
+// 排行榜镜像（GitHub Pages 静态文件，国内稳定读取；jsonblob 负责写入）
+const LEADERBOARD_MIRROR = "https://kevingaogogogo.github.io/arrow-storm/leaderboard.json";
+const LEADERBOARD_LOCAL_KEY = "arrowStormLeaderboardCache";
 
 const Leaderboard = {
   tabs: [
@@ -169,22 +172,43 @@ const Leaderboard = {
   async load(options = {}) {
     const silent = !!options.silent;
     if (!silent) this.status = "loading";
-    try {
-      let id = this.id;
-      let res = await this.request("GET", id);
-      if (res.status === 404) {
-        id = await this.createBlob({ version: 1, players: [] });
-        res = await this.request("GET", id);
+    // 尝试顺序：GitHub 镜像（国内稳定）→ jsonblob（最新）→ localStorage 缓存（离线兜底）
+    const attempts = [
+      async () => {
+        const res = await fetch(LEADERBOARD_MIRROR, { cache: "no-store" });
+        if (!res.ok) throw new Error("mirror failed");
+        return this.normalize(await res.json());
+      },
+      async () => {
+        let id = this.id;
+        let res = await this.request("GET", id);
+        if (res.status === 404) {
+          id = await this.createBlob({ version: 1, players: [] });
+          res = await this.request("GET", id);
+        }
+        if (!res.ok) throw new Error("jsonblob failed");
+        return this.normalize(await res.json());
+      },
+      async () => {
+        const raw = localStorage.getItem(LEADERBOARD_LOCAL_KEY);
+        if (!raw) throw new Error("no cache");
+        return this.normalize(JSON.parse(raw));
       }
-      if (!res.ok) throw new Error("leaderboard load failed");
-      this.data = this.normalize(await res.json());
-      this.status = "ready";
-      this.cacheChampion();
-      return this.data;
-    } catch (_) {
-      if (!silent) this.status = "error";
-      throw _;
+    ];
+    let lastErr = null;
+    for (const fn of attempts) {
+      try {
+        const data = await fn();
+        this.data = data;
+        this.status = "ready";
+        // 缓存成功数据（离线兜底）
+        try { localStorage.setItem(LEADERBOARD_LOCAL_KEY, JSON.stringify(data)); } catch (_) {}
+        this.cacheChampion();
+        return data;
+      } catch (e) { lastErr = e; }
     }
+    if (!silent) this.status = "error";
+    throw lastErr || new Error("leaderboard load failed");
   },
   isProgressBetter(a, b) {
     if ((a.chapter || 1) !== (b.chapter || 1)) return (a.chapter || 1) > (b.chapter || 1);
@@ -739,7 +763,7 @@ class Enemy {
     // 难度曲线：敌人 HP 随波次线性增长（每波 +8%），Boss 线性而非指数
     const chapBonus = 1 + Math.floor((SaveSystem.data.bestWave || 0) / 10) * 0.15;
     const waveBonus = 1 + (wave - 1) * 0.08;
-    let hp = { minion: 26, archer: 38, tank: 95, flyer: 30, boss: 700 + wave * 90 }[type] * chapBonus * waveBonus;
+    let hp = { minion: 26, archer: 38, tank: 95, flyer: 30, boss: 500 + wave * 70 }[type] * chapBonus * waveBonus;
     // 精英词缀加成
     if (this.isElite) {
       hp *= this.eliteAffix === "huge" ? 3.2 : this.eliteAffix === "armored" ? 2.4 : 1.7;
@@ -1771,7 +1795,7 @@ class Game {
       this.shake = Math.max(this.shake || 0, 10);
       return;
     }
-    const baseCount = this.roomType === "elite" ? Util.randi(2, 3) : this.roomIndex === 4 ? Util.randi(3, 5) : Util.randi(2, 4 + Math.min(1, Math.floor(this.chapter / 3)));
+    const baseCount = this.roomType === "elite" ? Util.randi(3, 4) : this.roomIndex === 4 ? Util.randi(4, 6) : Util.randi(3, 5 + Math.min(2, Math.floor(this.chapter / 2)));
     const types = [];
     types.push("minion");
     if (difficulty >= 2) types.push("flyer");

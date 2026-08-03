@@ -1,0 +1,50 @@
+{
+ "version": 1,
+ "players": [
+  {
+   "name": "测试王",
+   "chapter": 3,
+   "room": 4,
+   "totalDmg": 45600,
+   "tankDmg": 890,
+   "gold": 320,
+   "ts": 1722600000000
+  },
+  {
+   "name": "阿明",
+   "chapter": 2,
+   "room": 5,
+   "totalDmg": 32100,
+   "tankDmg": 1560,
+   "gold": 210,
+   "ts": 1722600100000
+  },
+  {
+   "name": "小鱼",
+   "chapter": 5,
+   "room": 1,
+   "totalDmg": 78900,
+   "tankDmg": 450,
+   "gold": 540,
+   "ts": 1722600200000
+  },
+  {
+   "name": "阿豪",
+   "chapter": 4,
+   "room": 6,
+   "totalDmg": 65400,
+   "tankDmg": 2300,
+   "gold": 180,
+   "ts": 1722600300000
+  },
+  {
+   "name": "无名箭客",
+   "chapter": 1,
+   "room": 0,
+   "totalDmg": 165,
+   "tankDmg": 105,
+   "gold": 4,
+   "ts": 1785730187766
+  }
+ ]
+}
