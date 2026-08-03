@@ -379,9 +379,11 @@ class Enemy {
     this.iceT = 0;
     this.drift = Util.rand(-1, 1);
     this.isBoss = type === "boss";
+    // 章节加成：最高波数每 10 波为一章，敌人变强
+    const chapBonus = 1 + Math.floor((SaveSystem.data.bestWave || 0) / 10) * 0.15;
     const hp = { minion: 20, archer: 30, tank: 80, flyer: 25, boss: 600 + wave * 250 }[type];
-    this.hp = hp;
-    this.maxHp = hp;
+    this.hp = hp * chapBonus;
+    this.maxHp = this.hp;
     this.r = this.isBoss ? 72 : type === "tank" ? 28 : 21;
     this.baseSpeed = type === "tank" ? 18 : type === "flyer" ? 22 : 0;
     this.bossRush = 0;
@@ -404,6 +406,11 @@ class Enemy {
     this.active = false;
     game.kills += 1;
     game.score += this.isBoss ? CONFIG.BOSS_SCORE : CONFIG.ENEMY_SCORE;
+    // 金币掉落：随波次轻微递增
+    const base = this.isBoss ? 40 : { minion: 2, archer: 3, tank: 5, flyer: 3 }[this.type] || 2;
+    const gold = Math.round(base * (1 + game.wave * 0.03));
+    game.runGold = (game.runGold || 0) + gold;
+    game.particles.get(this.x, this.y - this.r, Util.rand(-8, 8), -60, 0.8, "#f7c948", 1, `+${gold}`, false);
     for (let i = 0; i < (this.isBoss ? 34 : 12); i++) {
       game.particles.get(this.x, this.y, Util.rand(-130, 130), Util.rand(-180, 60), Util.rand(0.35, 0.9), this.isBoss ? "#f7c948" : "#d99a48", Util.rand(3, 10));
     }
@@ -772,6 +779,83 @@ function rollChoices() {
   return picks;
 }
 
+// ── 局外成长存档系统（方案A：localStorage 自动存档）──
+const SAVE_KEY = "arrowStormSave";
+const SAVE_VERSION = 1;
+
+const DEFAULTS = {
+  gold: 0,
+  equip: { bow: 0, charm: 0, sigil: 0 },   // 0-3 级
+  talents: { dmg: 0, hp: 0, arrow: 0 },    // 0-3 级
+  chapter: 1,
+  bestWave: 0
+};
+
+const SaveSystem = {
+  data: null,
+  load() {
+    try {
+      const raw = localStorage.getItem(SAVE_KEY);
+      if (!raw) { this.data = { ...DEFAULTS, equip: { ...DEFAULTS.equip }, talents: { ...DEFAULTS.talents } }; return this.data; }
+      const parsed = JSON.parse(raw);
+      // 版本/字段迁移：缺字段用默认值补齐
+      this.data = {
+        gold: parsed.gold || 0,
+        equip: { ...DEFAULTS.equip, ...(parsed.equip || {}) },
+        talents: { ...DEFAULTS.talents, ...(parsed.talents || {}) },
+        chapter: parsed.chapter || 1,
+        bestWave: parsed.bestWave || 0
+      };
+      return this.data;
+    } catch (e) {
+      this.data = { ...DEFAULTS, equip: { ...DEFAULTS.equip }, talents: { ...DEFAULTS.talents } };
+      return this.data;
+    }
+  },
+  save() {
+    try { localStorage.setItem(SAVE_KEY, JSON.stringify(this.data)); } catch (e) { /* 无痕模式静默失败 */ }
+  },
+  addGold(n) { this.data.gold = Math.max(0, Math.floor(this.data.gold + n)); this.save(); },
+  // 装备/天赋价格：随等级递增
+  equipPrice(slot) { const lv = this.data.equip[slot]; return [80, 180, 380][lv] || 0; },
+  talentPrice(slot) { const lv = this.data.talents[slot]; return [100, 220, 450][lv] || 0; },
+  canBuyEquip(slot) { return this.data.equip[slot] < 3 && this.data.gold >= this.equipPrice(slot); },
+  canBuyTalent(slot) { return this.data.talents[slot] < 3 && this.data.gold >= this.talentPrice(slot); },
+  buyEquip(slot) {
+    if (!this.canBuyEquip(slot)) return false;
+    this.data.gold -= this.equipPrice(slot);
+    this.data.equip[slot]++;
+    this.save();
+    return true;
+  },
+  buyTalent(slot) {
+    if (!this.canBuyTalent(slot)) return false;
+    this.data.gold -= this.talentPrice(slot);
+    this.data.talents[slot]++;
+    this.save();
+    return true;
+  }
+};
+SaveSystem.load();
+
+// 局外成长 → 玩家初始属性加成
+function applyMetaProgression(p) {
+  const s = SaveSystem.data;
+  // 装备：弓 = 伤害/射速
+  const bow = s.equip.bow;
+  p.damage = CONFIG.BASE_ARROW_DAMAGE * (1 + bow * 0.18);
+  p.fireRate = CONFIG.BASE_FIRE_RATE * (1 + bow * 0.1);
+  // 护符 = 暴击
+  p.crit = Math.min(0.6, s.equip.charm * 0.08);
+  // 法阵 = 元素强度
+  p.elemBoost = 1 + s.equip.sigil * 0.25;
+  // 天赋：伤害 / 生命 / 初始箭数
+  p.damage *= 1 + s.talents.dmg * 0.12;
+  p.maxHp = 100 + s.talents.hp * 15;
+  p.hp = p.maxHp;
+  p.arrowCount = Math.min(5, 1 + s.talents.arrow);
+}
+
 class Game {
   constructor() {
     this.player = new Player();
@@ -818,6 +902,8 @@ class Game {
     audio.ensure();
     this.state = "PLAY";
     this.player.reset();
+    applyMetaProgression(this.player); // 局外成长 → 初始属性
+    this.runGold = 0; // 本局获得金币（死亡结算入账）
     this.arrows.items.length = 0;
     this.enemies.items.length = 0;
     this.bullets.items.length = 0;
@@ -825,12 +911,18 @@ class Game {
     this.resetWorld();
     this.spawnWave();
   }
+  openShop() { audio.ensure(); this.state = "SHOP"; }
+  closeShop() { this.state = "MENU"; }
   gameOver() {
     if (this.state !== "PLAY") return;
     this.state = "GAME_OVER";
     audio.death();
     this.highScore = Math.max(this.highScore, Math.floor(this.distance));
     localStorage.setItem("arrowStormHighScore", String(this.highScore));
+    // 局外成长：死亡结算金币入账 + 记录最高波数
+    SaveSystem.addGold(this.runGold || 0);
+    SaveSystem.data.bestWave = Math.max(SaveSystem.data.bestWave || 0, this.wave);
+    SaveSystem.save();
   }
   getFlySpeed() {
     return CONFIG.BASE_FLY_SPEED * (1 + this.flyBonus);
@@ -977,7 +1069,8 @@ class Game {
         this.flashMessage("宝箱：回复 40%");
       } else {
         this.score += 300;
-        this.flashMessage("宝箱：金币 +300");
+        this.runGold = (this.runGold || 0) + 60;
+        this.flashMessage("宝箱：金币 +60");
       }
       audio.chest();
       for (let i = 0; i < 35; i++) this.particles.get(this.chest.x, this.chest.y, Util.rand(-150, 150), Util.rand(-190, 40), 0.9, "#f7c948", Util.rand(4, 10));
@@ -1033,6 +1126,10 @@ class Game {
     // 三选一卡牌界面（画在最上层）
     if (this.state === "CHOOSE" && this.choices) {
       drawChoiceCards(g, this);
+    }
+    // 商店界面
+    if (this.state === "SHOP") {
+      drawShop(g, this);
     }
     // 觉醒大字
     if (this.awakenT > 0 && this.awakenMsg) {
@@ -1387,6 +1484,121 @@ function drawChoiceCards(g, state) {
 }
 
 
+function drawShop(g, state) {
+  const s = SaveSystem.data;
+  g.save();
+  g.fillStyle = "rgba(7,12,8,0.88)";
+  g.fillRect(0, 0, CONFIG.W, CONFIG.H);
+  g.textAlign = "center";
+  // 标题 + 金币
+  g.fillStyle = "#f8e9ff";
+  g.font = "bold 36px Microsoft YaHei, sans-serif";
+  g.fillText("局外成长", CONFIG.W / 2, 72);
+  g.fillStyle = "#f7c948";
+  g.font = "bold 22px Microsoft YaHei, sans-serif";
+  g.fillText(`💰 ${s.gold} 金币`, CONFIG.W / 2, 112);
+  g.fillStyle = "#8a94a3";
+  g.font = "14px Microsoft YaHei, sans-serif";
+  g.fillText(`最高波数 ${s.bestWave || 0}`, CONFIG.W / 2, 138);
+
+  // 装备区
+  g.fillStyle = "#c77dff";
+  g.textAlign = "left";
+  g.font = "bold 18px Microsoft YaHei, sans-serif";
+  g.fillText("装备（永久加成）", 40, 180);
+  const equips = [
+    { slot: "bow", name: "古弓", icon: "弓", lv: s.equip.bow, desc: lv => `伤害 +${lv * 18}%  射速 +${lv * 10}%` },
+    { slot: "charm", name: "护符", icon: "符", lv: s.equip.charm, desc: lv => `暴击 +${lv * 8}%` },
+    { slot: "sigil", name: "法阵", icon: "阵", lv: s.equip.sigil, desc: lv => `元素强度 +${lv * 25}%` }
+  ];
+  equips.forEach((eq, i) => {
+    const y = 210 + i * 92;
+    // 卡片底
+    g.fillStyle = "#1a2029";
+    roundRect(g, 28, y, 484, 78, 10);
+    g.fill();
+    g.fillStyle = "#5fc6ff";
+    g.font = "bold 26px Microsoft YaHei, sans-serif";
+    g.fillText(eq.icon, 58, y + 44);
+    g.fillStyle = "#e8eef6";
+    g.font = "bold 18px Microsoft YaHei, sans-serif";
+    g.fillText(eq.name, 96, y + 34);
+    g.fillStyle = "#9aa5b4";
+    g.font = "13px Microsoft YaHei, sans-serif";
+    g.fillText(`Lv.${eq.lv}/3  ${eq.desc(eq.lv)}`, 96, y + 58);
+    // 等级点
+    for (let d = 0; d < 3; d++) {
+      g.fillStyle = d < eq.lv ? "#f7c948" : "rgba(255,255,255,0.14)";
+      g.beginPath();
+      g.arc(470, y + 26 + d * 14, 5, 0, TAU);
+      g.fill();
+    }
+    // 购买按钮
+    const price = SaveSystem.equipPrice(eq.slot);
+    const maxed = eq.lv >= 3;
+    const afford = !maxed && s.gold >= price;
+    if (maxed) {
+      g.fillStyle = "rgba(74,222,128,0.2)";
+      roundRect(g, 388, y + 46, 108, 24, 6); g.fill();
+      g.fillStyle = "#4ade80"; g.font = "13px Microsoft YaHei, sans-serif";
+      g.fillText("已满级", 442, y + 64);
+    } else {
+      g.fillStyle = afford ? "#a865ff" : "rgba(168,101,255,0.3)";
+      roundRect(g, 388, y + 46, 108, 24, 6); g.fill();
+      g.fillStyle = afford ? "#fff" : "#8a94a3"; g.font = "13px Microsoft YaHei, sans-serif";
+      g.fillText(`${price} 金币`, 442, y + 64);
+    }
+  });
+
+  // 天赋区
+  g.fillStyle = "#c77dff";
+  g.font = "bold 18px Microsoft YaHei, sans-serif";
+  g.fillText("天赋（每局生效）", 40, 506);
+  const talents = [
+    { slot: "dmg", name: "力量", icon: "力", lv: s.talents.dmg, desc: lv => `初始伤害 +${lv * 12}%` },
+    { slot: "hp", name: "体质", icon: "体", lv: s.talents.hp, desc: lv => `初始生命 +${lv * 15}` },
+    { slot: "arrow", name: "箭术", icon: "箭", lv: s.talents.arrow, desc: lv => `初始箭数 +${lv}` }
+  ];
+  talents.forEach((t, i) => {
+    const y = 536 + i * 78;
+    g.fillStyle = "#1a2029";
+    roundRect(g, 28, y, 484, 64, 10);
+    g.fill();
+    g.fillStyle = "#5fc6ff";
+    g.font = "bold 24px Microsoft YaHei, sans-serif";
+    g.fillText(t.icon, 58, y + 38);
+    g.fillStyle = "#e8eef6";
+    g.font = "bold 16px Microsoft YaHei, sans-serif";
+    g.fillText(t.name, 96, y + 30);
+    g.fillStyle = "#9aa5b4";
+    g.font = "12px Microsoft YaHei, sans-serif";
+    g.fillText(`Lv.${t.lv}/3  ${t.desc(t.lv)}`, 96, y + 50);
+    const price = SaveSystem.talentPrice(t.slot);
+    const maxed = t.lv >= 3;
+    const afford = !maxed && s.gold >= price;
+    if (maxed) {
+      g.fillStyle = "rgba(74,222,128,0.2)";
+      roundRect(g, 388, y + 20, 108, 24, 6); g.fill();
+      g.fillStyle = "#4ade80"; g.font = "13px Microsoft YaHei, sans-serif";
+      g.fillText("已满级", 442, y + 38);
+    } else {
+      g.fillStyle = afford ? "#a865ff" : "rgba(168,101,255,0.3)";
+      roundRect(g, 388, y + 20, 108, 24, 6); g.fill();
+      g.fillStyle = afford ? "#fff" : "#8a94a3"; g.font = "13px Microsoft YaHei, sans-serif";
+      g.fillText(`${price} 金币`, 442, y + 38);
+    }
+  });
+
+  // 返回按钮
+  g.fillStyle = "rgba(255,255,255,0.12)";
+  roundRect(g, 210, 812, 120, 44, 10); g.fill();
+  g.fillStyle = "#e8eef6";
+  g.font = "bold 18px Microsoft YaHei, sans-serif";
+  g.fillText("返回", 270, 841);
+  g.restore();
+}
+
+
 function drawChest(g, c) {
   const s = Util.worldScale(c.y);
   drawShadow(g, c.x, c.y + 26 * s, 38 * s, 11 * s, 0.36);
@@ -1449,6 +1661,8 @@ function drawHud(g, state) {
   g.font = "15px Microsoft YaHei, sans-serif";
   g.fillText(`第 ${state.wave} 波  击杀 ${state.kills}`, 510, 66);
   g.fillText(`御剑 ${state.player.swords.length}/3${state.player.shield > 0 ? `  盾${state.player.shield}` : ""}`, 510, 90);
+  g.fillStyle = "#f7c948";
+  g.fillText(`💰${state.runGold || 0}`, 96, 108);
   drawMute(g, state);
   if (state.boss && state.boss.active) {
     const p = Util.clamp(state.boss.hp / state.boss.maxHp, 0, 1);
@@ -1492,15 +1706,24 @@ function drawMenu(g, state) {
   g.font = "20px Microsoft YaHei, sans-serif";
   g.fillText("v2.1  自动飞行 · 三选一强化 · 流派觉醒", CONFIG.W / 2, 292);
   drawButton(g, CONFIG.W / 2 - 105, 376, 210, 62, "开始");
+  // 商店按钮 + 金币
+  g.fillStyle = "rgba(168,101,255,0.18)";
+  roundRect(g, CONFIG.W / 2 - 88, 462, 176, 46, 10); g.fill();
+  g.strokeStyle = "rgba(168,101,255,0.5)";
+  g.lineWidth = 2;
+  roundRect(g, CONFIG.W / 2 - 88, 462, 176, 46, 10); g.stroke();
+  g.fillStyle = "#f7c948";
+  g.font = "bold 18px Microsoft YaHei, sans-serif";
+  g.fillText(`商店 · ${SaveSystem.data.gold} 💰`, CONFIG.W / 2, 492);
   g.fillStyle = "#f1dfbf";
   g.font = "18px Microsoft YaHei, sans-serif";
-  g.fillText(`最高分：${state.highScore}m`, CONFIG.W / 2, 478);
+  g.fillText(`最高分：${state.highScore}m`, CONFIG.W / 2, 556);
   g.font = "16px Microsoft YaHei, sans-serif";
   const lines = ["←→ / AD 控制横移，触摸拖拽控制角色 X", "每 240m 暂停弹出 3 张强化卡（白/蓝/紫/金稀有度）", "连选 3 个同系强化触发流派觉醒", "每 5 波 Boss，击杀后穿过金色宝箱拿大奖励"];
-  lines.forEach((line, i) => g.fillText(line, CONFIG.W / 2, 558 + i * 34));
+  lines.forEach((line, i) => g.fillText(line, CONFIG.W / 2, 626 + i * 34));
   g.fillStyle = "#a9977d";
   g.font = "14px Microsoft YaHei, sans-serif";
-  g.fillText(`音效：${audio.muted ? "关" : "开"}  点击左上角音符切换`, CONFIG.W / 2, 716);
+  g.fillText(`音效：${audio.muted ? "关" : "开"}  点击左上角音符切换`, CONFIG.W / 2, 786);
   g.restore();
 }
 
@@ -1516,7 +1739,10 @@ function drawGameOver(g, state) {
   g.font = "22px Microsoft YaHei, sans-serif";
   g.fillText(`距离 ${Math.floor(state.distance)}m`, CONFIG.W / 2, 340);
   g.fillText(`击杀 ${state.kills}  第 ${state.wave} 波`, CONFIG.W / 2, 380);
-  g.fillText(`最高分 ${state.highScore}m`, CONFIG.W / 2, 420);
+  g.fillStyle = "#f7c948";
+  g.fillText(`本局金币 +${state.runGold || 0}`, CONFIG.W / 2, 420);
+  g.fillStyle = "#f1dfbf";
+  g.fillText(`最高分 ${state.highScore}m`, CONFIG.W / 2, 460);
   drawButton(g, CONFIG.W / 2 - 105, 504, 210, 62, "重开");
   g.restore();
 }
@@ -1600,6 +1826,34 @@ function activateAt(x, y) {
   }
   if (game.state === "MENU") {
     if (x >= CONFIG.W / 2 - 105 && x <= CONFIG.W / 2 + 105 && y >= 376 && y <= 438) game.start();
+    else if (x >= CONFIG.W / 2 - 88 && x <= CONFIG.W / 2 + 88 && y >= 462 && y <= 508) game.openShop();
+  } else if (game.state === "SHOP") {
+    // 返回按钮
+    if (x >= 210 && x <= 330 && y >= 812 && y <= 856) { game.closeShop(); return; }
+    // 装备购买（3 槽，y: 210/302/394 + 78 高）
+    const eqSlots = ["bow", "charm", "sigil"];
+    for (let i = 0; i < 3; i++) {
+      const by = 210 + i * 92;
+      if (x >= 28 && x <= 512 && y >= by && y <= by + 78) {
+        if (x >= 388 && x <= 496 && y >= by + 46 && y <= by + 70 && SaveSystem.canBuyEquip(eqSlots[i])) {
+          if (SaveSystem.buyEquip(eqSlots[i])) audio.upgrade();
+          return;
+        }
+        return;
+      }
+    }
+    // 天赋购买（3 槽，y: 536/614/692 + 64 高）
+    const tSlots = ["dmg", "hp", "arrow"];
+    for (let i = 0; i < 3; i++) {
+      const ty = 536 + i * 78;
+      if (x >= 28 && x <= 512 && y >= ty && y <= ty + 64) {
+        if (x >= 388 && x <= 496 && y >= ty + 20 && y <= ty + 44 && SaveSystem.canBuyTalent(tSlots[i])) {
+          if (SaveSystem.buyTalent(tSlots[i])) audio.upgrade();
+          return;
+        }
+        return;
+      }
+    }
   } else if (game.state === "GAME_OVER") {
     if (x >= CONFIG.W / 2 - 105 && x <= CONFIG.W / 2 + 105 && y >= 504 && y <= 566) game.start();
   }

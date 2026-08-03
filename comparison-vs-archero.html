@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>《箭雨》P0后 ×《弓箭传说》对比</title>
+<style>
+  :root {
+    --bg: #0e1116; --surface: #171c24; --surface2: #1e2530;
+    --text: #f2f4f8; --dim: #9aa5b4; --faint: #6b7686;
+    --accent: #a865ff; --good: #4ade80; --warn: #fbbf24; --bad: #f87171;
+    --line: rgba(255,255,255,.07);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+    padding: 44px 40px 60px; width: 1280px;
+  }
+  .kicker { color: var(--accent); font-size: 14px; letter-spacing: 3px; font-weight: 600; }
+  h1 { font-size: 34px; font-weight: 700; margin: 10px 0 8px; }
+  .lead { color: var(--dim); font-size: 15px; line-height: 1.7; max-width: 940px; margin-bottom: 30px; }
+  .verdict {
+    display: flex; align-items: center; gap: 14px;
+    background: linear-gradient(90deg, rgba(74,222,128,.13), rgba(168,101,255,.05));
+    border: 1px solid rgba(74,222,128,.3);
+    border-radius: 14px; padding: 16px 22px; margin-bottom: 34px;
+  }
+  .verdict .tag { background: var(--good); color: #0e1116; font-weight: 700; font-size: 13px; border-radius: 8px; padding: 6px 12px; white-space: nowrap; }
+  .verdict .txt { color: var(--text); font-size: 15px; line-height: 1.6; }
+  .verdict .txt b { color: var(--good); }
+
+  .section-title { font-size: 18px; font-weight: 700; margin: 38px 0 16px; display: flex; align-items: center; gap: 10px; }
+  .section-title .n { width: 26px; height: 26px; border-radius: 8px; background: var(--accent); color: #0e1116; display: grid; place-items: center; font-size: 13px; font-weight: 800; }
+
+  table { width: 100%; border-collapse: collapse; background: var(--surface); border-radius: 16px; overflow: hidden; }
+  thead th { text-align: left; font-size: 13px; color: var(--faint); font-weight: 600; padding: 14px 18px; border-bottom: 1px solid var(--line); letter-spacing: 1px; }
+  tbody td { padding: 15px 18px; border-bottom: 1px solid var(--line); vertical-align: top; font-size: 14px; line-height: 1.65; }
+  tbody tr:last-child td { border-bottom: none; }
+  td.dim { color: var(--dim); font-weight: 600; width: 120px; white-space: nowrap; }
+  td.cur { color: var(--text); width: 38%; }
+  td.new { color: var(--dim); width: 40%; }
+  .status { display: inline-block; font-size: 11px; font-weight: 700; border-radius: 20px; padding: 3px 10px; margin-left: 8px; vertical-align: 2px; }
+  .s-done { background: rgba(74,222,128,.16); color: var(--good); }
+  .s-part { background: rgba(251,191,36,.15); color: var(--warn); }
+  .s-gap { background: rgba(248,113,113,.16); color: var(--bad); }
+  .hl { color: var(--accent); font-weight: 600; }
+  .hlg { color: var(--good); font-weight: 600; }
+
+  .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 8px; }
+  .metric { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; }
+  .metric .v { font-size: 26px; font-weight: 800; color: var(--text); }
+  .metric .v small { font-size: 14px; color: var(--faint); font-weight: 600; }
+  .metric .l { color: var(--dim); font-size: 12px; margin-top: 6px; }
+  .metric .cmp { color: var(--faint); font-size: 11px; margin-top: 3px; }
+
+  .foot { margin-top: 36px; color: var(--faint); font-size: 12px; line-height: 1.8; border-top: 1px solid var(--line); padding-top: 16px; }
+</style>
+</head>
+<body>
+  <div class="kicker">HEAD-TO-HEAD · P0 改造后</div>
+  <h1>《箭雨》×《弓箭传说》现状对比</h1>
+  <div class="lead">
+    P0（构筑深度改造）已上线：三选一弹卡、18 种升级、稀有度、乘区联动、流派觉醒。
+    核心决策面的差距已从「体量 1/10」缩小到「核心缺口 4 项 → 2 项」，下一步进入局外成长（P1）。
+  </div>
+
+  <div class="verdict">
+    <span class="tag">总评</span>
+    <div class="txt">
+      <b>局内构筑已追平 70%</b>——三选一 + 稀有度 + 流派觉醒让单局有了《弓箭传说》的「选择焦虑」和「构筑成型」。
+      剩余差距集中在 <b>局外成长（死亡后变强）</b> 和 <b>内容生态（每日/排行）</b>，即 P1/P2。
+    </div>
+  </div>
+
+  <div class="section-title"><span class="n">1</span>核心指标</div>
+  <div class="metrics">
+    <div class="metric"><div class="v">18<small> 种</small></div><div class="l">升级技能池</div><div class="cmp">弓箭传说：100+（4 倍差距）</div></div>
+    <div class="metric"><div class="v">4<small> 级</small></div><div class="l">稀有度体系</div><div class="cmp">白/蓝/紫/金，与弓箭传说一致</div></div>
+    <div class="metric"><div class="v">4<small> 系</small></div><div class="l">流派觉醒</div><div class="cmp">弹道/元素/召唤/生存</div></div>
+    <div class="metric"><div class="v">3<small> 种</small></div><div class="l">乘区联动</div><div class="cmp">分裂/弹射/冰火爆炸</div></div>
+  </div>
+
+  <div class="section-title"><span class="n">2</span>八大维度逐项对比</div>
+  <table>
+    <thead>
+      <tr><th style="width:120px">维度</th><th>当前《箭雨》· P0 后</th><th>弓箭传说标准</th><th style="width:88px">状态</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="dim">局内成长</td>
+        <td class="cur"><span class="hlg">三选一弹卡</span>，18 种升级含 4 传说，稀有度权重抽取</td>
+        <td class="new">三选一，100+ 技能四大派系，构筑流派成型</td>
+        <td><span class="status s-done">已达标</span></td>
+      </tr>
+      <tr>
+        <td class="dim">构筑乘区</td>
+        <td class="cur"><span class="hlg">分裂箭 / 雷电弹射 / 冰火爆炸</span>，攻速×多箭×穿透互乘</td>
+        <td class="new">攻速×多箭×穿透×暴击×元素乘区，后期万箭齐发</td>
+        <td><span class="status s-part">已接近</span></td>
+      </tr>
+      <tr>
+        <td class="dim">局外成长</td>
+        <td class="cur">仅最高分记录，<span class="hl">死亡后无成长</span></td>
+        <td class="new">金币 + 装备五槽 + 英雄 + 天赋树，死亡后变强</td>
+        <td><span class="status s-gap">核心缺口</span></td>
+      </tr>
+      <tr>
+        <td class="dim">关卡结构</td>
+        <td class="cur">无尽距离 + 每 5 波 Boss，无通关目标</td>
+        <td class="new">章节制（50 章×50 关），通关目标 + 失败重试</td>
+        <td><span class="status s-gap">未开始</span></td>
+      </tr>
+      <tr>
+        <td class="dim">操作维度</td>
+        <td class="cur">左右横移 + 自动射击，PC 鼠标/键盘，手机拖拽</td>
+        <td class="new">四方向走位 + 主动瞄准（拖拽蓄力）</td>
+        <td><span class="status s-part">可接受</span></td>
+      </tr>
+      <tr>
+        <td class="dim">打击反馈</td>
+        <td class="cur">伤害数字 / 粒子 / 震屏 / 升级演出 / 觉醒大字</td>
+        <td class="new">命中顿帧 + 分层音效 + 击杀慢镜</td>
+        <td><span class="status s-part">已接近</span></td>
+      </tr>
+      <tr>
+        <td class="dim">单局节奏</td>
+        <td class="cur"><span class="hlg">每 240m 一个决策点</span>，稀有度选择焦虑</td>
+        <td class="new">每 30 秒一个决策点（技能/商店/事件/精英）</td>
+        <td><span class="status s-done">已达标</span></td>
+      </tr>
+      <tr>
+        <td class="dim">内容生态</td>
+        <td class="cur">无金币 / 任务 / 排行 / 每日</td>
+        <td class="new">每日挑战 + 签到 + 赛季排行 + 活动</td>
+        <td><span class="status s-gap">未开始</span></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="section-title"><span class="n">3</span>结论与下一步</div>
+  <table>
+    <tbody>
+      <tr>
+        <td class="dim" style="width:120px">差距总结</td>
+        <td class="cur">核心缺口从 4 项减至 <span class="hlg">2 项</span>：局外成长、内容生态。局内体验（成长/节奏/反馈）已具备弓箭传说级骨架。</td>
+        <td class="new" style="width:auto"></td>
+        <td style="width:88px"></td>
+      </tr>
+      <tr>
+        <td class="dim">下一步</td>
+        <td class="cur"><span class="hl">P1 局外成长</span>：金币经济 + 装备三槽（弓/护符/法阵）+ 永久天赋 + 章节目标——让「死亡」变得有价值，这是留存引擎。</td>
+        <td class="new" style="width:auto"></td>
+        <td style="width:88px"></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="foot">
+    对比基准：《弓箭传说》(Archero, Habby) 竖屏 Roguelite 全球标杆。P0 改造已于 2026-08-03 上线（commit d437989）。
+    状态评级基于当前代码结构（单 HTML 文件 ~50KB）的完成度评估，非运营数据。
+  </div>
+</body>
+</html>
