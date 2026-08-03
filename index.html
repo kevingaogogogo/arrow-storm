@@ -253,6 +253,12 @@ class Arrow {
     this.x += this.vx * dt;
     this.y += this.vy * dt;
     this.travel += Math.hypot(this.vx * dt, this.vy * dt);
+    // 属性箭拖尾：火=火星，冰=冰晶
+    if (this.fire && Math.random() < 0.5) {
+      game.particles.get(this.x, this.y, Util.rand(-14, 14), Util.rand(-14, 14), 0.3, Util.pick(["#ff7b3d", "#ffb15b", "#ff4f3d"]), Util.rand(2, 4));
+    } else if (this.ice && Math.random() < 0.45) {
+      game.particles.get(this.x, this.y, Util.rand(-12, 12), Util.rand(-12, 12), 0.35, Util.pick(["#9fe8ff", "#5fc6ff", "#d6f5ff"]), Util.rand(2, 3.5));
+    }
     if (this.y < -80 || this.travel > this.range) this.active = false;
     for (const e of game.enemies.active()) {
       if (!this.active || e.dead || this.hitIds.has(e.id)) continue;
@@ -268,21 +274,26 @@ class Arrow {
   }
   render(g) {
     g.save();
-    g.strokeStyle = "rgba(255,255,255,0.78)";
+    // 属性箭配色：普通紫 / 火橙红 / 冰蓝
+    let body, glow, hot, trail;
+    if (this.fire) { body = "#ff7b3d"; glow = "#ff4f3d"; hot = "#ffe3c2"; trail = "rgba(255,121,61,0.75)"; }
+    else if (this.ice) { body = "#5fc6ff"; glow = "#3fa9ff"; hot = "#e6f9ff"; trail = "rgba(95,198,255,0.75)"; }
+    else { body = CONFIG.COLORS.purple; glow = CONFIG.COLORS.purple; hot = CONFIG.COLORS.purpleHot; trail = "rgba(255,255,255,0.78)"; }
+    g.strokeStyle = trail;
     g.lineWidth = 3;
     g.beginPath();
     g.moveTo(this.lastX, this.lastY + 10);
     g.lineTo(this.x, this.y + 26);
     g.stroke();
     g.shadowBlur = 18;
-    g.shadowColor = CONFIG.COLORS.purple;
-    g.strokeStyle = CONFIG.COLORS.purpleHot;
+    g.shadowColor = glow;
+    g.strokeStyle = hot;
     g.lineWidth = 5;
     g.beginPath();
     g.moveTo(this.x, this.y + 12);
     g.lineTo(this.x, this.y - 18);
     g.stroke();
-    g.fillStyle = CONFIG.COLORS.purple;
+    g.fillStyle = body;
     g.beginPath();
     g.moveTo(this.x, this.y - 24);
     g.lineTo(this.x - 7, this.y - 9);
@@ -345,10 +356,13 @@ class Enemy {
   }
   takeDamage(amount, crit, game, fire, ice) {
     this.hp -= amount;
-    if (fire) this.fireT = 2;
-    if (ice) this.iceT = 2;
+    if (fire) this.fireT = 3;
+    if (ice) this.iceT = 2.5;
     game.damageNumber(this.x, this.y - this.r - 12, Math.round(amount), crit);
     audio.hit();
+    // 属性命中特效：火=橙色爆燃，冰=蓝白冰晶
+    if (fire) for (let i = 0; i < 8; i++) game.particles.get(this.x, this.y, Util.rand(-70, 70), Util.rand(-100, 20), Util.rand(0.3, 0.6), Util.pick(["#ff7b3d", "#ff4f3d", "#ffb15b"]), Util.rand(3, 7));
+    if (ice) for (let i = 0; i < 8; i++) game.particles.get(this.x, this.y, Util.rand(-70, 70), Util.rand(-100, 20), Util.rand(0.3, 0.6), Util.pick(["#9fe8ff", "#5fc6ff", "#e6f9ff"]), Util.rand(3, 6));
     for (let i = 0; i < 4; i++) game.particles.get(this.x, this.y, Util.rand(-55, 55), Util.rand(-90, -20), 0.35, crit ? "#ffd56a" : "#fb8840", Util.rand(3, 7));
     if (this.hp <= 0) this.kill(game);
   }
@@ -372,10 +386,10 @@ class Enemy {
     this.y += scroll;
     if (this.fireT > 0) {
       this.fireT -= dt;
-      this.takeDot(5 * dt, game, "#e54d3c");
+      this.takeDot(8 * dt, game, "#e54d3c");
     }
     if (this.iceT > 0) this.iceT -= dt;
-    const slow = this.iceT > 0 ? 0.6 : 1;
+    const slow = this.iceT > 0 ? 0.5 : 1;
     if (this.type === "tank") this.y += this.baseSpeed * slow * dt;
     if (this.type === "flyer") {
       this.x += Math.sin(this.t * 2.4 + this.drift) * 55 * dt;
@@ -450,6 +464,13 @@ class Enemy {
     if (!this.isBoss) {
       drawSmallHp(g, this.x, this.y - this.r * s - 16, 48, this.hp / this.maxHp);
     }
+    // 状态可视化：燃烧火苗 / 冰冻寒气（从敌人身上冒出的粒子）
+    if (this.fireT > 0 && Math.random() < 0.5) {
+      game.particles.get(this.x + Util.rand(-14, 14), this.y - this.r * s, Util.rand(-8, 8), -60, 0.4, Util.pick(["#ff7b3d", "#ffb15b"]), Util.rand(2.5, 5));
+    }
+    if (this.iceT > 0 && Math.random() < 0.5) {
+      game.particles.get(this.x + Util.rand(-14, 14), this.y - this.r * s, Util.rand(-6, 6), -30, 0.45, Util.pick(["#9fe8ff", "#d6f5ff"]), Util.rand(2, 4));
+    }
   }
 }
 
@@ -465,22 +486,40 @@ class Sword {
   }
   update(dt, game) {
     const n = Math.max(1, game.player.swords.length);
+    // 御剑：平时环绕玩家，锁定目标时飞出斩击
+    if (this.target) {
+      const dx = this.target.x - this.x;
+      const dy = this.target.y - this.y;
+      const d = Math.hypot(dx, dy);
+      if (d < 14 || !this.target.active || this.target.dead) {
+        this.target = null;
+      } else {
+        const sp = 620;
+        this.x += dx / d * sp * dt;
+        this.y += dy / d * sp * dt;
+        this.angle += 12 * dt; // 飞行旋转
+        // 斩击拖尾
+        if (Math.random() < 0.6) game.particles.get(this.x, this.y, Util.rand(-10, 10), Util.rand(-10, 10), 0.22, "#d9f7ff", Util.rand(2, 4));
+        return;
+      }
+    }
     this.angle += 3.2 * dt;
     const orbit = 42;
     this.x = game.player.x + Math.cos(this.angle + this.index * TAU / n) * orbit;
     this.y = game.player.y + Math.sin(this.angle + this.index * TAU / n) * orbit * 0.45;
     this.cooldown -= dt;
     if (this.cooldown <= 0) {
+      // 索敌范围：全屏上方区域（400px），御剑就该范围广
       let best = null;
       let bestD = 999999;
       for (const e of game.enemies.active()) {
         if (e.dead) continue;
         const d = Util.dist2(this, e);
-        if (d < bestD && d < 260 * 260) { best = e; bestD = d; }
+        if (d < bestD && d < 400 * 400) { best = e; bestD = d; }
       }
       if (best) {
         best.takeDamage(15, false, game, false, false);
-        this.target = { x: best.x, y: best.y };
+        this.target = best; // 直接引用敌人对象，死亡/失活时自动解除锁定
         this.slashT = 0.12;
         audio.sword();
       }
@@ -609,24 +648,30 @@ class Player {
 }
 
 const UPGRADES = [
-  { id: "damage", name: "强弓", desc: "弓箭伤害 +10%", apply: g => { g.player.damage *= 1.1; } },
-  { id: "rate", name: "疾射", desc: "射击频率 +10%", apply: g => { g.player.fireRate = Math.min(6, g.player.fireRate * 1.1); } },
-  { id: "range", name: "远射", desc: "射击距离 +10%", apply: g => { g.player.range = Math.min(1500, g.player.range * 1.1); } },
-  { id: "speed", name: "横移", desc: "横移速度 +10%", apply: g => { g.player.moveSpeed = Math.min(700, g.player.moveSpeed * 1.1); } },
-  { id: "hp", name: "生命", desc: "生命值 +24", apply: g => { g.player.maxHp = Math.min(200, g.player.maxHp + 24); g.player.hp = Math.min(g.player.maxHp, g.player.hp + 24); } },
-  { id: "multi", name: "多重箭", desc: "箭矢数量 +1", apply: g => { g.player.arrowCount = Math.min(5, g.player.arrowCount + 1); } },
-  { id: "pierce", name: "穿透", desc: "穿透 +1", apply: g => { g.player.pierce = Math.min(3, g.player.pierce + 1); } },
-  { id: "crit", name: "会心", desc: "暴击率 +10%", apply: g => { g.player.crit = Math.min(0.6, g.player.crit + 0.1); } },
-  { id: "fire", name: "火焰箭", desc: "灼烧 2 秒", apply: g => { g.player.fire = true; } },
-  { id: "ice", name: "冰霜箭", desc: "减速 40%", apply: g => { g.player.ice = true; } },
-  { id: "sword", name: "御剑", desc: "飞剑 +1", apply: g => { if (g.player.swords.length < 3) g.player.swords.push(new Sword(g.player.swords.length, g)); } },
-  { id: "fly", name: "骑剑加速", desc: "飞行速度 +12%", apply: g => { g.flyBonus = Math.min(0.6, g.flyBonus + 0.12); } }
+  { id: "damage", name: "强弓", desc: "弓箭伤害 +15%", max: Infinity, has: g => g.player.damage >= 999, apply: g => { g.player.damage = Math.min(999, g.player.damage * 1.15); } },
+  { id: "rate", name: "疾射", desc: "射击频率 +12%", max: 6, has: g => g.player.fireRate >= 6, apply: g => { g.player.fireRate = Math.min(6, g.player.fireRate * 1.12); } },
+  { id: "range", name: "远射", desc: "射击距离 +12%", max: 1500, has: g => g.player.range >= 1500, apply: g => { g.player.range = Math.min(1500, g.player.range * 1.12); } },
+  { id: "speed", name: "横移", desc: "横移速度 +12%", max: 700, has: g => g.player.moveSpeed >= 700, apply: g => { g.player.moveSpeed = Math.min(700, g.player.moveSpeed * 1.12); } },
+  { id: "hp", name: "生命", desc: "生命值 +30", max: 200, has: g => g.player.maxHp >= 200, apply: g => { g.player.maxHp = Math.min(200, g.player.maxHp + 30); g.player.hp = Math.min(g.player.maxHp, g.player.hp + 30); } },
+  { id: "multi", name: "多重箭", desc: "箭矢数量 +1", max: 5, has: g => g.player.arrowCount >= 5, apply: g => { g.player.arrowCount = Math.min(5, g.player.arrowCount + 1); } },
+  { id: "pierce", name: "穿透", desc: "穿透 +1", max: 3, has: g => g.player.pierce >= 3, apply: g => { g.player.pierce = Math.min(3, g.player.pierce + 1); } },
+  { id: "crit", name: "会心", desc: "暴击率 +12%", max: 0.6, has: g => g.player.crit >= 0.6, apply: g => { g.player.crit = Math.min(0.6, g.player.crit + 0.12); } },
+  { id: "fire", name: "火焰箭", desc: "命中灼烧 3 秒（每秒 8 伤）", max: 1, has: g => g.player.fire, apply: g => { g.player.fire = true; } },
+  { id: "ice", name: "冰霜箭", desc: "命中减速 50% 持续 2.5 秒", max: 1, has: g => g.player.ice, apply: g => { g.player.ice = true; } },
+  { id: "sword", name: "御剑", desc: "飞剑 +1（自动索敌斩击）", max: 3, has: g => g.player.swords.length >= 3, apply: g => { if (g.player.swords.length < 3) g.player.swords.push(new Sword(g.player.swords.length, g)); } },
+  { id: "fly", name: "骑剑加速", desc: "飞行速度 +12%", max: 0.6, has: g => g.flyBonus >= 0.6, apply: g => { g.flyBonus = Math.min(0.6, g.flyBonus + 0.12); } }
 ];
 
 function rollGate() {
-  const a = Util.pick(UPGRADES);
-  let b = Util.pick(UPGRADES);
-  while (b.id === a.id) b = Util.pick(UPGRADES);
+  // 只从「未满级」的升级里抽，防止浪费
+  const avail = UPGRADES.filter(u => !u.has(game));
+  if (avail.length < 2) {
+    // 全部满级：回血/回盾兜底
+    return [UPGRADES[0], UPGRADES[4]];
+  }
+  const a = Util.pick(avail);
+  let b = Util.pick(avail);
+  while (b.id === a.id) b = Util.pick(avail);
   return [a, b];
 }
 
@@ -660,6 +705,8 @@ class Game {
     this.boss = null;
     this.gate = null;
     this.chest = null;
+    this.ring = null;
+    this.shake = 0;
     this.decor.length = 0;
     this.leaves.length = 0;
     for (let i = 0; i < 38; i++) this.decor.push(this.makeDecor(Util.rand(0, CONFIG.H), Math.random() < 0.58 ? "tree" : Math.random() < 0.78 ? "rock" : "fence"));
@@ -705,6 +752,12 @@ class Game {
     for (const p of this.particles.active()) p.update(dt);
     this.updateGate(dt);
     this.updateChest(dt);
+    if (this.ring) {
+      this.ring.r += (this.ring.maxR - this.ring.r) * Math.min(1, dt * 9);
+      this.ring.life -= dt;
+      if (this.ring.life <= 0) this.ring = null;
+    }
+    if (this.shake > 0) this.shake = Math.max(0, this.shake - dt * 26);
     if (this.messageT > 0) this.messageT -= dt;
   }
   updateBackdrop(dt) {
@@ -782,9 +835,14 @@ class Game {
   }
   applyUpgrade(up) {
     up.apply(this);
+    // 升级演出：金色大字 + 扩散光圈 + 冲击粒子 + 屏幕微震
     this.flashMessage(`${up.name}：${up.desc}`);
+    this.particles.get(this.player.x, this.player.y, 0, 0, 0.9, "#f7c948", 10, up.name, false); // 大字
+    this.particles.get(this.player.x, this.player.y, 0, 0, 0.9, "#f7c948", 8, up.desc, false);
+    this.ring = { x: this.player.x, y: this.player.y, r: 10, maxR: 190, life: 0.55 };
+    this.shake = Math.max(this.shake || 0, 7);
     audio.upgrade();
-    for (let i = 0; i < 22; i++) this.particles.get(this.player.x, this.player.y, Util.rand(-110, 110), Util.rand(-170, -30), 0.7, "#a865ff", Util.rand(3, 8));
+    for (let i = 0; i < 34; i++) this.particles.get(this.player.x, this.player.y, Util.rand(-160, 160), Util.rand(-200, 60), 0.75, Util.pick(["#f7c948", "#a865ff", "#fff1a5"]), Util.rand(3, 9));
   }
   spawnChest() {
     this.chest = { x: CONFIG.W / 2, y: -60, r: 34 };
@@ -828,6 +886,11 @@ class Game {
     this.messageT = 1.8;
   }
   render(g) {
+    g.save();
+    // 屏幕震动
+    if (this.shake > 0.2) {
+      g.translate(Util.rand(-this.shake, this.shake) * 0.5, Util.rand(-this.shake, this.shake) * 0.5);
+    }
     drawWorld(g, this);
     if (this.gate) drawGate(g, this.gate);
     if (this.chest) drawChest(g, this.chest);
@@ -838,8 +901,18 @@ class Game {
     for (const a of this.arrows.active()) a.render(g);
     for (const b of this.bullets.active()) b.render(g);
     this.player.render(g);
+    // 升级光圈（画在粒子下层）
+    if (this.ring) {
+      const a = Util.clamp(this.ring.life / 0.55, 0, 1);
+      g.strokeStyle = `rgba(247,201,72,${0.75 * a})`;
+      g.lineWidth = 5 * a;
+      g.beginPath();
+      g.arc(this.ring.x, this.ring.y, this.ring.r, 0, TAU);
+      g.stroke();
+    }
     for (const p of this.particles.active()) p.render(g);
     drawUI(g, this);
+    g.restore();
   }
 }
 
