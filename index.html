@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-  <title>箭雨 v3.25</title>
+  <title>箭雨 v3.26</title>
   <style>
     html, body {
       margin: 0;
@@ -50,8 +50,8 @@
   </style>
 </head>
 <body>
-  <canvas id="game" width="540" height="960" aria-label="箭雨 v3.25 游戏画布"></canvas>
-  <div id="landscapeBlocker">请旋转设备为竖屏<br>箭雨 v3.25 仅支持竖屏飞行</div>
+  <canvas id="game" width="540" height="960" aria-label="箭雨 v3.26 游戏画布"></canvas>
+  <div id="landscapeBlocker">请旋转设备为竖屏<br>箭雨 v3.26 仅支持竖屏飞行</div>
 <script>
 "use strict";
 
@@ -1644,6 +1644,7 @@ class Player {
     this.stavePierce = 0;    // 奥术穿透（能量球穿透 +1/级）
     this.staveDrain = 0;     // 灵魂汲取（命中回血/级）
     this.weaponCatOverride = undefined; // 局内武器转换（undefined=用局外配置）
+    this.weaponSkinOverride = undefined; // 局内武器装备（undefined=用局外免费武器）
     this.swords = [];
     this.inv = 0;
     this.pickedUpgrades = [];
@@ -2041,8 +2042,8 @@ function rollChoices() {
 
 function getInRunShopItems() {
   return [
-    { id: "shop_dmg", name: "伤害训练", icon: "伤", price: 20, desc: "本局伤害 +15%", apply: g => { g.player.damage += Math.round(CONFIG.BASE_ARROW_DAMAGE * 0.15); } },
-    { id: "shop_rate", name: "疾射药剂", icon: "速", price: 20, desc: "本局射速 +15%", apply: g => { g.player.fireRate = Math.min(6, g.player.fireRate * 1.15); } },
+    { id: "shop_dmg", name: "伤害训练", icon: "伤", price: 20, desc: "本局伤害 +10%", apply: g => { g.player.damage += Math.round(CONFIG.BASE_ARROW_DAMAGE * 0.10); } },
+    { id: "shop_rate", name: "疾射药剂", icon: "速", price: 20, desc: "本局射速 +10%", apply: g => { g.player.fireRate = Math.min(6, g.player.fireRate * 1.10); } },
     { id: "shop_heal", name: "生命药水", icon: "心", price: 20, desc: "回复 50% 生命", apply: g => { g.player.hp = Math.min(g.player.maxHp, g.player.hp + g.player.maxHp * 0.5); } },
     { id: "shop_shield", name: "护盾符文", icon: "盾", price: 20, desc: "护盾 +1", apply: g => { g.player.shield = (g.player.shield || 0) + 1; } },
     { id: "shop_arrow", name: isStaveMode() ? "法球连发" : "多重箭袋", icon: isStaveMode() ? "球" : "箭", price: 20, desc: isStaveMode() ? "能量球 +1" : "箭矢 +1", apply: g => { g.player.arrowCount = Math.min(3, g.player.arrowCount + 1); } },
@@ -2074,12 +2075,12 @@ const DEFAULTS = {
 
 // 英雄天赋树定义（局外成长，每级 1 点，无限成长钩子）
 const HERO_TALENTS = [
-  { id: "dmg", name: "战神", icon: "⚔", desc: "伤害 +5%/级", max: 20, color: "#ffd56a" },
-  { id: "rate", name: "连射", icon: "➶", desc: "射速 +4%/级", max: 20, color: "#7fe0ff" },
-  { id: "hp", name: "不灭", icon: "❤", desc: "生命 +12/级", max: 20, color: "#ff6b81" },
-  { id: "crit", name: "精准", icon: "✦", desc: "暴击 +3%/级", max: 20, color: "#ff9ecb" },
-  { id: "gold", name: "招财", icon: "💰", desc: "金币获取 +8%/级", max: 20, color: "#f7c948" },
-  { id: "luck", name: "幸运", icon: "🍀", desc: "稀有卡概率 +3%/级", max: 20, color: "#8affc1" }
+  { id: "dmg", name: "战神", icon: "⚔", desc: "伤害 +2.5%/级", max: 20, color: "#ffd56a" },
+  { id: "rate", name: "连射", icon: "➶", desc: "射速 +2%/级", max: 20, color: "#7fe0ff" },
+  { id: "hp", name: "不灭", icon: "❤", desc: "生命 +8/级", max: 20, color: "#ff6b81" },
+  { id: "crit", name: "精准", icon: "✦", desc: "暴击 +1.5%/级", max: 20, color: "#ff9ecb" },
+  { id: "gold", name: "招财", icon: "💰", desc: "金币获取 +5%/级", max: 20, color: "#f7c948" },
+  { id: "luck", name: "幸运", icon: "🍀", desc: "稀有卡概率 +2%/级", max: 20, color: "#8affc1" }
 ];
 // 升级所需经验曲线
 // 升级经验曲线：前期快后期慢（天赋点获取随等级递减，局外成长线拉长）
@@ -2109,16 +2110,25 @@ const WEAPON_SKINS = [
   { id: 2, name: "冰霜弓", icon: "❄", price: 150, color: "#5fc6ff", desc: "减速效果 +40%，射速 +6%", bonus: { slow: 1.4, rate: 1.06 } },
   { id: 3, name: "雷神弓", icon: "⚡", price: 200, color: "#f7c948", desc: "暴击率 +12%，箭速 +15%", bonus: { crit: 0.12, arrowSpeed: 1.15 } }
 ];
-// 法杖：第二武器路线（慢速高伤 + 自带元素，弓箭传说2 式双流派）
+// 法杖：第二武器路线（重击流——单发高伤 + 自带元素，与弓的快攻形成明显区分）
+// 弓 DPS≈28（14伤×2速） vs 法杖 DPS≈29（26.6伤×1.1速）——总输出接近但手感截然不同：
+// 弓=高频低伤弹幕，法杖=低频重击能量球（每发都是威胁，配元素更强）
 const WEAPON_STAVES = [
-  { id: 0, name: "木法杖", icon: "🪄", price: 0, color: "#8b6a4a", desc: "初始法杖：慢速高伤，无元素", bonus: { dmg: 1.5, rate: 0.62, elem: null } },
-  { id: 1, name: "火焰法杖", icon: "🔥", price: 160, color: "#e54d3c", desc: "自带灼烧，元素伤害 +30%", bonus: { dmg: 1.55, rate: 0.62, elem: "fire", elemBoost: 1.3 } },
-  { id: 2, name: "冰霜法杖", icon: "❄", price: 190, color: "#5fc6ff", desc: "自带减速，元素伤害 +30%", bonus: { dmg: 1.55, rate: 0.62, elem: "ice", elemBoost: 1.3 } },
-  { id: 3, name: "雷电法杖", icon: "⚡", price: 240, color: "#f7c948", desc: "自带弹射，暴击率 +15%", bonus: { dmg: 1.6, rate: 0.62, elem: "volt", crit: 0.15 } }
+  { id: 0, name: "木法杖", icon: "🪄", price: 0, color: "#8b6a4a", desc: "初始法杖：重击流，无元素", bonus: { dmg: 1.9, rate: 0.55, elem: null } },
+  { id: 1, name: "火焰法杖", icon: "🔥", price: 160, color: "#e54d3c", desc: "自带灼烧，元素伤害 +30%", bonus: { dmg: 1.95, rate: 0.55, elem: "fire", elemBoost: 1.3 } },
+  { id: 2, name: "冰霜法杖", icon: "❄", price: 190, color: "#5fc6ff", desc: "自带减速，元素伤害 +30%", bonus: { dmg: 1.95, rate: 0.55, elem: "ice", elemBoost: 1.3 } },
+  { id: 3, name: "雷电法杖", icon: "⚡", price: 240, color: "#f7c948", desc: "自带弹射，暴击率 +15%", bonus: { dmg: 2.0, rate: 0.55, elem: "volt", crit: 0.15 } }
 ];
-function getWeaponSkin() { return WEAPON_SKINS[SaveSystem.data.weaponSkin] || WEAPON_SKINS[0]; }
-function getWeaponStave() { return WEAPON_STAVES[SaveSystem.data.weaponSkin] || WEAPON_STAVES[0]; }
-// 当前生效武器路线：局内转换卷轴（player.weaponCatOverride）优先，其次局外存档
+function getWeaponSkin() {
+  // 局内购买的武器（weaponSkinOverride）本局优先；否则永远用免费木弓（武器不再永久）
+  const idx = (typeof game !== "undefined" && game && game.player && typeof game.player.weaponSkinOverride === "number") ? game.player.weaponSkinOverride : 0;
+  return WEAPON_SKINS[idx] || WEAPON_SKINS[0];
+}
+function getWeaponStave() {
+  const idx = (typeof game !== "undefined" && game && game.player && typeof game.player.weaponSkinOverride === "number") ? game.player.weaponSkinOverride : 0;
+  return WEAPON_STAVES[idx] || WEAPON_STAVES[0];
+}
+// 当前生效武器路线：局内转换卷轴（player.weaponCatOverride）优先，其次局外配置
 function isStaveMode() {
   try {
     if (game && game.player && typeof game.player.weaponCatOverride === "number") return game.player.weaponCatOverride === 1;
@@ -2235,29 +2245,29 @@ SaveSystem.load();
 // 局外成长 → 玩家初始属性加成
 function applyMetaProgression(p) {
   const s = SaveSystem.data;
-  // 装备：弓 = 伤害/射速
+  // 装备：猎弓/法杖强化 = 伤害/射速（砍半防爆炸：18%→10%，10%→6%）
   const bow = s.equip.bow;
-  p.damage = CONFIG.BASE_ARROW_DAMAGE * (1 + bow * 0.18);
-  p.fireRate = CONFIG.BASE_FIRE_RATE * (1 + bow * 0.1);
-  // 护符 = 暴击
-  p.crit = Math.min(0.6, s.equip.charm * 0.08);
-  // 法阵 = 元素强度
-  p.elemBoost = 1 + s.equip.sigil * 0.25;
-  // 天赋：伤害 / 生命 / 初始箭数
-  p.damage *= 1 + s.talents.dmg * 0.12;
-  p.maxHp = 40 + s.talents.hp * 15;
+  p.damage = CONFIG.BASE_ARROW_DAMAGE * (1 + bow * 0.10);
+  p.fireRate = CONFIG.BASE_FIRE_RATE * (1 + bow * 0.06);
+  // 护符 = 暴击（8%→5%）
+  p.crit = Math.min(0.6, s.equip.charm * 0.05);
+  // 法阵 = 元素强度（25%→12%）
+  p.elemBoost = 1 + s.equip.sigil * 0.12;
+  // 天赋：伤害 / 生命 / 初始箭数（12%→6%，15→10）
+  p.damage *= 1 + s.talents.dmg * 0.06;
+  p.maxHp = 40 + s.talents.hp * 10;
   p.hp = p.maxHp;
   p.arrowCount = Math.min(5, 1 + s.talents.arrow);
-  // 英雄天赋树加成（局外成长）
+  // 英雄天赋树加成（局外成长，全部砍半防爆炸）
   const ht = s.heroTree || {};
-  p.damage *= 1 + (ht.dmg || 0) * 0.05;
-  p.fireRate *= 1 + (ht.rate || 0) * 0.04;
-  p.maxHp += (ht.hp || 0) * 12;
+  p.damage *= 1 + (ht.dmg || 0) * 0.025;
+  p.fireRate *= 1 + (ht.rate || 0) * 0.02;
+  p.maxHp += (ht.hp || 0) * 8;
   p.hp = p.maxHp;
-  p.crit = Math.min(0.6, p.crit + (ht.crit || 0) * 0.03);
-  p.heroGoldMult = 1 + (ht.gold || 0) * 0.08;
-  p.heroLuck = (ht.luck || 0) * 0.03;
-  // 武器皮肤加成
+  p.crit = Math.min(0.6, p.crit + (ht.crit || 0) * 0.015);
+  p.heroGoldMult = 1 + (ht.gold || 0) * 0.05;
+  p.heroLuck = (ht.luck || 0) * 0.02;
+  // 武器加成（局内购买的武器本局生效，免费武器无加成）
   applyWeaponSkin(p);
 }
 
@@ -2594,46 +2604,43 @@ class Game {
       SaveSystem.buyEquip(slot);
       // 实时应用：装备加成为乘区（在局内当前基础上乘），不覆盖局内升级
       const lv = s.equip[slot];
-      if (slot === "bow") { this.player.damage = Math.round(this.player.damage * (1 + 0.18)); this.player.fireRate = Math.min(6, this.player.fireRate * 1.1); }
-      else if (slot === "charm") this.player.crit = Math.min(0.6, this.player.crit + 0.08);
-      else if (slot === "sigil") this.player.elemBoost = Math.min(3, (this.player.elemBoost || 1) * 1.25);
+      if (slot === "bow") { this.player.damage = Math.round(this.player.damage * (1 + 0.10)); this.player.fireRate = Math.min(6, this.player.fireRate * 1.06); }
+      else if (slot === "charm") this.player.crit = Math.min(0.6, this.player.crit + 0.05);
+      else if (slot === "sigil") this.player.elemBoost = Math.min(3, (this.player.elemBoost || 1) * 1.12);
     } else if (kind === "talent") {
       if (!SaveSystem.canBuyTalent(slot)) return false;
       SaveSystem.buyTalent(slot);
       const lv = s.talents[slot];
-      if (slot === "dmg") this.player.damage = Math.round(this.player.damage * (1 + 0.12));
-      else if (slot === "hp") { const add = 15; this.player.maxHp = Math.min(240, this.player.maxHp + add); this.player.hp = Math.min(this.player.maxHp, this.player.hp + add); }
+      if (slot === "dmg") this.player.damage = Math.round(this.player.damage * (1 + 0.06));
+      else if (slot === "hp") { const add = 10; this.player.maxHp = Math.min(240, this.player.maxHp + add); this.player.hp = Math.min(this.player.maxHp, this.player.hp + add); }
       else if (slot === "arrow") this.player.arrowCount = Math.min(3, this.player.arrowCount + 1);
     } else if (kind === "weapon") {
-      // 切换武器路线（弓↔法杖）：只切路线，不动装备/拥有状态
+      // 武器 = 局内临时增强：花局内金币，本局生效，死亡后回免费武器（不永久）
       if (slot === "cat") {
-        s.weaponCat = 1 - s.weaponCat;
-        SaveSystem.save();
-        this.flashMessage(s.weaponCat === 1 ? "已切换法杖路线" : "已切换弓箭路线");
-        codexUnlock("skins", "cat_" + s.weaponCat);
-        return true;
-      }
-      // 购买/装备当前路线武器：拥有状态按路线独立记录
-      const ownList = s.weaponCat === 1 ? s.weaponOwn.stave : s.weaponOwn.bow;
-      const price = (isStaveMode() ? WEAPON_STAVES[slot] : WEAPON_SKINS[slot]).price;
-      if (ownList.includes(slot)) {
-        // 已拥有：直接装备
-        s.weaponSkin = slot;
-        SaveSystem.save();
-        this.flashMessage("已装备");
-      } else if (s.gold >= price) {
-        s.gold -= price;
-        ownList.push(slot);
-        s.weaponSkin = slot;
-        SaveSystem.save();
-        this.flashMessage(`购买成功：${(isStaveMode() ? WEAPON_STAVES[slot] : WEAPON_SKINS[slot]).name}`);
-      } else {
-        this.flashMessage(`金币不足（需要 ${price}）`);
+        // 局内切换路线：仅本局生效（用局内金币）
+        if ((this.runGold || 0) >= 30) {
+          this.runGold -= 30;
+          this.player.weaponCatOverride = 1 - (this.player.weaponCatOverride ?? SaveSystem.data.weaponCat);
+          this.flashMessage(this.player.weaponCatOverride === 1 ? "本局已切换法杖路线！" : "本局已切换弓箭路线！");
+          codexUnlock("skins", "cat_" + this.player.weaponCatOverride);
+          return true;
+        }
+        this.flashMessage("局内金币不足（需要 30）");
         audio.death();
         return false;
       }
-      // 图鉴解锁：武器皮肤
-      codexUnlock("skins", String(slot));
+      // 购买/装备当前路线武器（局内金币，本局生效）
+      const w = isStaveMode() ? WEAPON_STAVES[slot] : WEAPON_SKINS[slot];
+      if ((this.runGold || 0) >= w.price) {
+        this.runGold -= w.price;
+        this.player.weaponSkinOverride = slot; // 本局装备，死亡/下一局重置
+        this.flashMessage(`已装备 ${w.name}（本局）`);
+        codexUnlock("skins", String(slot));
+        return true;
+      }
+      this.flashMessage(`局内金币不足（需要 ${w.price}）`);
+      audio.death();
+      return false;
     }
     SaveSystem.save();
     this.flashMessage("购买成功！");
@@ -3691,17 +3698,47 @@ function drawInRunShop(g, state) {
       g.font = "12px Microsoft YaHei, sans-serif";
       g.fillText(item.sold ? "已购买" : `${item.price} 金币`, x + w / 2, y + 72);
     }
+    // 武器区（局内金币购买，本局生效，死亡回免费武器）
+    const s = SaveSystem.data;
+    const wy = 458;
+    g.fillStyle = "#9aa5b4";
+    g.font = "12px Microsoft YaHei, sans-serif";
+    g.textAlign = "left";
+    g.fillText(isStaveMode() ? "武器（法杖，本局）" : "武器（弓，本局）", 44, wy - 6);
+    g.font = "10px Microsoft YaHei, sans-serif";
+    g.fillStyle = "#7a8594";
+    g.fillText("本局生效 · 死亡回免费武器", 44, wy + 6);
+    const wList = isStaveMode() ? WEAPON_STAVES : WEAPON_SKINS;
+    wList.forEach((w, i) => {
+      const wx = 44 + i * 120;
+      const current = (typeof game.player.weaponSkinOverride === "number" ? game.player.weaponSkinOverride : 0) === i;
+      const afford = (state.runGold || 0) >= w.price;
+      g.fillStyle = current ? "#2a2418" : "#1a2029";
+      roundRect(g, wx, wy + 14, 112, 56, 8); g.fill();
+      if (current) { g.strokeStyle = "#f7c948"; g.lineWidth = 2; roundRect(g, wx, wy + 14, 112, 56, 8); g.stroke(); }
+      else if (afford) { g.strokeStyle = "rgba(247,201,72,0.4)"; g.lineWidth = 1; roundRect(g, wx, wy + 14, 112, 56, 8); g.stroke(); }
+      g.fillStyle = w.color;
+      g.font = "bold 16px Microsoft YaHei, sans-serif";
+      g.fillText(w.icon, wx + 24, wy + 38);
+      g.fillStyle = current ? "#f7c948" : "#e8eef6";
+      g.font = "bold 11px Microsoft YaHei, sans-serif";
+      g.fillText(w.name, wx + 44, wy + 32);
+      g.fillStyle = current ? "#f7c948" : afford ? "#f7c948" : "#8a94a3";
+      g.font = "10px Microsoft YaHei, sans-serif";
+      g.fillText(current ? "使用中" : `${w.price}💰`, wx + 44, wy + 52);
+    });
+    g.textAlign = "center";
   } else {
     // 永久成长：装备 3 卡一行 + 天赋 3 卡一行 + 武器路线（花永久金币）
     const s = SaveSystem.data;
     const equips = [
-      { slot: "bow", name: "古弓", lv: s.equip.bow, desc: `伤害+${s.equip.bow * 18}% 射速+${s.equip.bow * 10}%` },
-      { slot: "charm", name: "护符", lv: s.equip.charm, desc: `暴击+${s.equip.charm * 8}%` },
-      { slot: "sigil", name: "法阵", lv: s.equip.sigil, desc: `元素+${s.equip.sigil * 25}%` }
+      { slot: "bow", name: isStaveMode() ? "法杖强化" : "猎弓", lv: s.equip.bow, desc: `伤害+${s.equip.bow * 10}% 射速+${s.equip.bow * 6}%` },
+      { slot: "charm", name: "护符", lv: s.equip.charm, desc: `暴击+${s.equip.charm * 5}%` },
+      { slot: "sigil", name: "法阵", lv: s.equip.sigil, desc: `元素+${s.equip.sigil * 12}%` }
     ];
     const talents = [
-      { slot: "dmg", name: "力量", lv: s.talents.dmg, desc: `伤害+${s.talents.dmg * 12}%` },
-      { slot: "hp", name: "体质", lv: s.talents.hp, desc: `生命+${s.talents.hp * 15}` },
+      { slot: "dmg", name: "力量", lv: s.talents.dmg, desc: `伤害+${s.talents.dmg * 6}%` },
+      { slot: "hp", name: "体质", lv: s.talents.hp, desc: `生命+${s.talents.hp * 10}` },
       { slot: "arrow", name: "箭术", lv: s.talents.arrow, desc: `箭数+${s.talents.arrow}` }
     ];
     // 分组标题 + 3 卡横排（每卡 150×92）
@@ -3742,40 +3779,11 @@ function drawInRunShop(g, state) {
     };
     drawRow("装备", equips.map(e => ({ ...e, price: SaveSystem.equipPrice(e.slot) })), 246, "equip");
     drawRow("天赋", talents.map(t => ({ ...t, price: SaveSystem.talentPrice(t.slot) })), 352, "talent");
-    // 武器路线（弓/法杖切换 + 当前路线 4 款武器）
-    const wy = 462;
-    g.fillStyle = "#9aa5b4";
-    g.font = "12px Microsoft YaHei, sans-serif";
-    g.textAlign = "left";
-    g.fillText("武器路线：", 44, wy - 6);
-    // 切换按钮：弓 / 法杖
-    [["弓", 0], ["法杖", 1]].forEach(([label, cat], i) => {
-      const bx = 120 + i * 92;
-      const active = s.weaponCat === cat;
-      g.fillStyle = active ? "rgba(247,201,72,0.3)" : "rgba(255,255,255,0.1)";
-      roundRect(g, bx, wy, 82, 22, 6); g.fill();
-      if (active) { g.strokeStyle = "#f7c948"; g.lineWidth = 1.5; roundRect(g, bx, wy, 82, 22, 6); g.stroke(); }
-      g.fillStyle = active ? "#f7c948" : "#9aa5b4";
-      g.font = "bold 12px Microsoft YaHei, sans-serif";
-      g.fillText(`${label} ${active ? "✓" : ""}`, bx + 41, wy + 16);
-    });
-    // 当前路线武器（4 款，88×46）
-    const list = s.weaponCat === 1 ? WEAPON_STAVES : WEAPON_SKINS;
-    const ownList = s.weaponCat === 1 ? s.weaponOwn.stave : s.weaponOwn.bow;
-    list.forEach((w, i) => {
-      const wx = 120 + i * 92;
-      const current = s.weaponSkin === i;
-      const owned = ownList.includes(i);
-      g.fillStyle = current ? "#2a2418" : "#1a2029";
-      roundRect(g, wx, wy + 30, 82, 42, 8); g.fill();
-      if (current) { g.strokeStyle = "#f7c948"; g.lineWidth = 2; roundRect(g, wx, wy + 30, 82, 42, 8); g.stroke(); }
-      g.fillStyle = w.color;
-      g.font = "bold 14px Microsoft YaHei, sans-serif";
-      g.fillText(w.icon, wx + 41, wy + 48);
-      g.fillStyle = current ? "#f7c948" : "#e8eef6";
-      g.font = "11px Microsoft YaHei, sans-serif";
-      g.fillText(current ? "使用中" : owned ? "装备" : `${w.price}💰`, wx + 41, wy + 66);
-    });
+    // 说明：武器已改为局内临时增强（局内强化页购买，本局生效）
+    g.textAlign = "center";
+    g.fillStyle = "#7a8594";
+    g.font = "11px Microsoft YaHei, sans-serif";
+    g.fillText("武器为局内临时增强，请在「局内强化」页购买（本局生效）", CONFIG.W / 2, 470);
     g.textAlign = "center";
   }
   g.fillStyle = "#b9c2d0";
@@ -4440,7 +4448,7 @@ function drawMenu(g, state) {
   g.shadowBlur = 6 + 6 * pulse;
   g.fillStyle = "#d4c6af";
   g.font = "20px Microsoft YaHei, sans-serif";
-  g.fillText("v3.25 · 房间闯关 · 排行榜 · 每日挑战", CONFIG.W / 2, 292);
+  g.fillText("v3.26 · 房间闯关 · 排行榜 · 每日挑战", CONFIG.W / 2, 292);
   g.fillStyle = "#ffe59a";
   g.font = "bold 18px Microsoft YaHei, sans-serif";
   g.fillText(Leaderboard.champion || "暂无王者", CONFIG.W / 2, 326);
@@ -4738,8 +4746,17 @@ function activateAt(x, y) {
           return;
         }
       }
+      // 武器区（wy=458：武器卡 y 472-528，x=44+120i 宽 112）
+      const wList = isStaveMode() ? WEAPON_STAVES : WEAPON_SKINS;
+      for (let i = 0; i < wList.length; i++) {
+        const wx = 44 + i * 120;
+        if (x >= wx && x <= wx + 112 && y >= 472 && y <= 528) {
+          game.buyMetaFromInRun("weapon", i);
+          return;
+        }
+      }
     } else {
-      // 永久成长：装备 3 卡一行(246-338) + 天赋 3 卡一行(352-444) + 武器路线(462 起)
+      // 永久成长：装备 3 卡一行(246-338) + 天赋 3 卡一行(352-444)
       const eqSlots = ["bow", "charm", "sigil"];
       const tSlots = ["dmg", "hp", "arrow"];
       // 装备行（每卡 x=44+158i，宽 150，价格按钮 x+52~x+138, y+58~y+80）
@@ -4761,25 +4778,6 @@ function activateAt(x, y) {
             game.buyMetaFromInRun("talent", tSlots[i]);
             return;
           }
-          return;
-        }
-      }
-      // 武器路线区（wy=462：切换按钮 462-484，武器卡 492-534）
-      const skinY = 462;
-      // 切换按钮：弓/法杖
-      [[0, "弓"], [1, "法杖"]].forEach(([cat], i) => {
-        const bx = 120 + i * 92;
-        if (x >= bx && x <= bx + 82 && y >= skinY && y <= skinY + 22) {
-          game.buyMetaFromInRun("weapon", "cat");
-          return;
-        }
-      });
-      // 当前路线武器（4 款）
-      const wList = SaveSystem.data.weaponCat === 1 ? WEAPON_STAVES : WEAPON_SKINS;
-      for (let i = 0; i < wList.length; i++) {
-        const wx = 120 + i * 92;
-        if (x >= wx && x <= wx + 82 && y >= skinY + 30 && y <= skinY + 72) {
-          game.buyMetaFromInRun("weapon", i);
           return;
         }
       }
