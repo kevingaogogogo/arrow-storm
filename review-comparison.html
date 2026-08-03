@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>《箭雨》×《弓箭传说》策划对标</title>
+<style>
+  :root {
+    --bg: #0e1116; --surface: #171c24; --surface2: #1e2530;
+    --text: #f2f4f8; --dim: #9aa5b4; --faint: #6b7686;
+    --accent: #a865ff; --accent2: #7c5cff;
+    --good: #4ade80; --warn: #fbbf24; --bad: #f87171;
+    --line: rgba(255,255,255,.07);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+    padding: 44px 40px 60px; width: 1280px;
+  }
+  .kicker { color: var(--accent); font-size: 14px; letter-spacing: 3px; font-weight: 600; }
+  h1 { font-size: 34px; font-weight: 700; margin: 10px 0 8px; letter-spacing: .5px; }
+  .lead { color: var(--dim); font-size: 15px; line-height: 1.7; max-width: 900px; margin-bottom: 34px; }
+  .verdict {
+    display: flex; align-items: center; gap: 14px;
+    background: linear-gradient(90deg, rgba(168,101,255,.14), rgba(124,92,255,.05));
+    border: 1px solid rgba(168,101,255,.28);
+    border-radius: 14px; padding: 16px 22px; margin-bottom: 36px;
+  }
+  .verdict .tag {
+    background: var(--accent); color: #0e1116; font-weight: 700;
+    font-size: 13px; border-radius: 8px; padding: 6px 12px; white-space: nowrap;
+  }
+  .verdict .txt { color: var(--text); font-size: 15px; line-height: 1.6; }
+  .verdict .txt b { color: var(--accent); }
+
+  .section-title { font-size: 18px; font-weight: 700; margin: 40px 0 18px; display: flex; align-items: center; gap: 10px; }
+  .section-title .n {
+    width: 26px; height: 26px; border-radius: 8px; background: var(--accent); color: #0e1116;
+    display: grid; place-items: center; font-size: 13px; font-weight: 800;
+  }
+  .section-title .sub { color: var(--faint); font-size: 13px; font-weight: 400; }
+
+  table { width: 100%; border-collapse: collapse; background: var(--surface); border-radius: 16px; overflow: hidden; }
+  thead th {
+    text-align: left; font-size: 13px; color: var(--faint); font-weight: 600;
+    padding: 14px 18px; border-bottom: 1px solid var(--line); letter-spacing: 1px;
+  }
+  thead th.col-cur { color: var(--bad); }
+  thead th.col-new { color: var(--good); }
+  tbody td { padding: 15px 18px; border-bottom: 1px solid var(--line); vertical-align: top; font-size: 14px; line-height: 1.65; }
+  tbody tr:last-child td { border-bottom: none; }
+  td.dim { color: var(--dim); font-weight: 600; width: 130px; white-space: nowrap; }
+  td.cur { color: var(--dim); width: 40%; }
+  td.new { color: var(--text); width: 45%; }
+  td.new .hl { color: var(--accent); font-weight: 600; }
+  .gap-pill {
+    display: inline-block; font-size: 11px; font-weight: 700; border-radius: 20px;
+    padding: 3px 10px; margin-top: 6px;
+  }
+  .g0 { background: rgba(74,222,128,.14); color: var(--good); }
+  .g1 { background: rgba(251,191,36,.14); color: var(--warn); }
+  .g2 { background: rgba(248,113,113,.16); color: var(--bad); }
+
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .prio {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 20px 20px 18px;
+  }
+  .prio .ph { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+  .prio .badge { font-size: 12px; font-weight: 800; border-radius: 8px; padding: 5px 10px; color: #0e1116; }
+  .b0 { background: var(--good); } .b1 { background: var(--warn); } .b2 { background: var(--faint); }
+  .prio h3 { font-size: 15px; font-weight: 700; }
+  .prio .why { color: var(--faint); font-size: 12px; margin-bottom: 10px; }
+  .prio ul { list-style: none; }
+  .prio li {
+    font-size: 13px; color: var(--dim); line-height: 1.6; padding: 6px 0 6px 20px; position: relative;
+  }
+  .prio li::before { content: ""; position: absolute; left: 2px; top: 13px; width: 6px; height: 6px; border-radius: 2px; background: var(--accent); }
+  .prio li b { color: var(--text); }
+
+  .foot { margin-top: 40px; color: var(--faint); font-size: 12px; line-height: 1.8; border-top: 1px solid var(--line); padding-top: 18px; }
+</style>
+</head>
+<body>
+  <div class="kicker">GAME DESIGN REVIEW · 策划对标</div>
+  <h1>《箭雨》距离《弓箭传说》还差什么？</h1>
+  <div class="lead">
+    以 Habby《弓箭传说》(Archero) 的策划标准审视《箭雨》——它已经跑通了「自动飞行 + 穿门升级 + 御剑 + Boss」的核心循环，
+    但停留在「单局爽感」层面。真正的差距不在画面，而在 <b style="color:var(--accent)">成长系统的纵深</b> 和 <b style="color:var(--accent)">长线留存结构</b>。
+  </div>
+
+  <div class="verdict">
+    <span class="tag">核心结论</span>
+    <div class="txt">
+      当前《箭雨》≈ 弓箭传说的 <b>1/10 体量</b>：单局 5 分钟可玩，但缺少「局外成长」「技能构筑乘区」「关卡目标感」三大支柱。
+      建议按 <b>P0 构筑深度 → P1 局外成长 → P2 内容生态</b> 三步走，每步都能独立提升可玩性。
+    </div>
+  </div>
+
+  <div class="section-title"><span class="n">1</span>八大维度对标 <span class="sub">当前状态 vs 弓箭传说标准</span></div>
+  <table>
+    <thead>
+      <tr><th style="width:130px">维度</th><th class="col-cur">当前《箭雨》</th><th class="col-new">弓箭传说标准</th><th style="width:70px">差距</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="dim">局内成长</td>
+        <td class="cur">穿门二选一，12 种升级，线性叠加（+12% 这类）</td>
+        <td class="new">清房后<span class="hl">三选一</span>，100+ 技能分四大派系（弹道/元素/召唤/辅助），构筑流派成型</td>
+        <td><span class="gap-pill g2">核心缺口</span></td>
+      </tr>
+      <tr>
+        <td class="dim">构筑乘区</td>
+        <td class="cur">伤害/攻速/穿透各自独立，无明显联动化学反应</td>
+        <td class="new"><span class="hl">攻速×多箭×穿透×暴击×元素</span> 形成乘区，后期 5 万箭/秒的成装爽感</td>
+        <td><span class="gap-pill g2">核心缺口</span></td>
+      </tr>
+      <tr>
+        <td class="dim">局外成长</td>
+        <td class="cur">仅最高分记录（localStorage 一个数字）</td>
+        <td class="new">金币 + 装备五槽（弓/衣/戒/护符/宠物）+ 英雄系统 + 天赋树，<span class="hl">死亡后变强</span></td>
+        <td><span class="gap-pill g2">核心缺口</span></td>
+      </tr>
+      <tr>
+        <td class="dim">关卡结构</td>
+        <td class="cur">无尽距离 + 每 5 波 Boss，无终点无目标</td>
+        <td class="new">章节制（50 章×50 关），每章 Boss，<span class="hl">通关目标 + 失败重试</span>，扫荡系统</td>
+        <td><span class="gap-pill g1">中</span></td>
+      </tr>
+      <tr>
+        <td class="dim">操作维度</td>
+        <td class="cur">只控制左右横移，自动射击，操作深度 1 维</td>
+        <td class="new">四方向走位躲弹幕 + <span class="hl">主动瞄准射击</span>（拖拽蓄力），操作即乐趣</td>
+        <td><span class="gap-pill g1">中</span></td>
+      </tr>
+      <tr>
+        <td class="dim">打击反馈</td>
+        <td class="cur">已有伤害数字/粒子/震屏/升级演出（v2.0 刚加）</td>
+        <td class="new">命中顿帧 + 分层音效 + 受击高亮 + <span class="hl">击杀慢镜</span>，每击有"重量"</td>
+        <td><span class="gap-pill g1">中</span></td>
+      </tr>
+      <tr>
+        <td class="dim">单局节奏</td>
+        <td class="cur">3 分钟前无聊（敌人少），10 分钟后同质化</td>
+        <td class="new">每 30 秒一个决策点（技能/商店/事件/精英），<span class="hl">全程有选择焦虑</span></td>
+        <td><span class="gap-pill g1">中</span></td>
+      </tr>
+      <tr>
+        <td class="dim">内容生态</td>
+        <td class="cur">无金币、无任务、无排行、无每日</td>
+        <td class="new">每日挑战 + 签到 + 赛季排行 + 活动关卡，<span class="hl">每天回来玩 10 分钟的理由</span></td>
+        <td><span class="gap-pill g2">核心缺口</span></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="section-title"><span class="n">2</span>落地路线图 <span class="sub">按投入产出比排序，每步独立可交付</span></div>
+  <div class="grid3">
+    <div class="prio">
+      <div class="ph"><span class="badge b0">P0 · 1-2 天</span></div>
+      <h3>构筑深度改造</h3>
+      <div class="why">单文件内可完成，直接翻倍重玩性</div>
+      <ul>
+        <li><b>升级改三选一</b>：穿门改为暂停三卡，卡片带图标+稀有度（白/蓝/紫/金）</li>
+        <li><b>引入乘区联动</b>：攻速×多箭×穿透互乘，元素箭可叠加双属性</li>
+        <li><b>流派标签</b>：连选 3 个同系技能触发"流派觉醒"加成</li>
+        <li><b>稀有度权重</b>：金色技能（如"每次命中+1箭"）低概率高价值</li>
+      </ul>
+    </div>
+    <div class="prio">
+      <div class="ph"><span class="badge b1">P1 · 3-5 天</span></div>
+      <h3>局外成长系统</h3>
+      <div class="why">让"死"变得有价值，留存的核心引擎</div>
+      <ul>
+        <li><b>金币经济</b>：击杀/宝箱掉金币，死亡结算入账</li>
+        <li><b>三件装备槽</b>：弓（伤害/射速）、护符（暴击/穿透）、法阵（元素），每件 3 级</li>
+        <li><b>永久天赋</b>：初始 +10% 伤害 / +1 生命 / 开局多一箭，金币购买</li>
+        <li><b>关卡目标</b>：章节制，通关第 5/10/15 波 Boss 解锁下一章</li>
+      </ul>
+    </div>
+    <div class="prio">
+      <div class="ph"><span class="badge b2">P2 · 后续</span></div>
+      <h3>内容生态</h3>
+      <div class="why">从"游戏"变成"每天想打开的玩具"</div>
+      <ul>
+        <li><b>每日挑战</b>：固定种子+特殊规则，排行榜晒分</li>
+        <li><b>英雄系统</b>：3 个角色差异化技能（速射/暴击/御剑大师）</li>
+        <li><b>Boss 图鉴</b>：击杀解锁图鉴条目，集齐奖励</li>
+        <li><b>双周活动</b>：限时事件关（全屏弹幕/无限御剑）</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="foot">
+    评估基准：《弓箭传说》(Archero, Habby) 全球爆款竖屏 Roguelite 的标准架构。差距评级基于当前代码结构（单 HTML 文件，~47KB）的改造可行性。
+    P0 全部可在现有单文件内实现；P1 建议拆分为多文件或保持单文件但扩大至 80-100KB；P2 需要后端（排行/每日种子）。
+    数据为策划经验评估，非实际运营数据。
+  </div>
+</body>
+</html>

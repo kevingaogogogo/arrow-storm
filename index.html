@@ -236,6 +236,7 @@ class Arrow {
     this.active = true;
     this.x = x; this.y = y;
     this.lastX = x; this.lastY = y;
+    this.angle = angle;
     this.vx = Math.sin(angle) * CONFIG.BASE_ARROW_SPEED;
     this.vy = -Math.cos(angle) * CONFIG.BASE_ARROW_SPEED;
     this.damage = damage;
@@ -246,6 +247,9 @@ class Arrow {
     this.critChance = critChance;
     this.fire = fire;
     this.ice = ice;
+    this.split = false;
+    this.volt = 0;
+    this.frostfire = false;
     this.hitIds = new Set();
   }
   update(dt, game) {
@@ -267,6 +271,34 @@ class Arrow {
         const crit = Math.random() < this.critChance;
         const dmg = this.damage * (crit ? 2 : 1);
         e.takeDamage(dmg, crit, game, this.fire, this.ice);
+        // 乘区联动 1：分裂箭 —— 命中生成 2 支小箭（30% 伤害）
+        if (this.split) {
+          for (const da of [-0.22, 0.22]) {
+            game.arrows.get(this.x, this.y, this.angle + da, this.damage * 0.3, this.range * 0.6, 0, this.critChance, this.fire, this.ice);
+          }
+        }
+        // 乘区联动 2：雷电箭 —— 弹射至最近其他敌人（50% 伤害）
+        if (this.volt > 0) {
+          let best = null, bestD = 999999;
+          for (const e2 of game.enemies.active()) {
+            if (e2 === e || e2.dead || this.hitIds.has(e2.id)) continue;
+            const d = Util.dist2(e, e2);
+            if (d < bestD && d < 300 * 300) { best = e2; bestD = d; }
+          }
+          if (best) {
+            best.takeDamage(this.damage * 0.5, false, game, this.fire, this.ice);
+            for (let i = 0; i < 6; i++) game.particles.get(best.x, best.y, Util.rand(-40, 40), Util.rand(-60, 10), 0.3, "#d9f7ff", Util.rand(2, 5));
+          }
+        }
+        // 乘区联动 3：冰火共鸣 —— 冰冻敌人受火伤时爆炸
+        if (this.frostfire && this.fire && e.iceT > 0) {
+          e.takeDamage(this.damage * 0.8, false, game, false, false);
+          for (const e2 of game.enemies.active()) {
+            if (e2 === e || e2.dead) continue;
+            if (Util.dist2(e, e2) <= 110 * 110) e2.takeDamage(this.damage * 0.4, false, game, false, false);
+          }
+          for (let i = 0; i < 20; i++) game.particles.get(e.x, e.y, Util.rand(-120, 120), Util.rand(-140, 40), 0.5, Util.pick(["#ff7b3d", "#5fc6ff"]), Util.rand(3, 7));
+        }
         this.pierce -= 1;
         if (this.pierce < 0) this.active = false;
       }
@@ -386,7 +418,7 @@ class Enemy {
     this.y += scroll;
     if (this.fireT > 0) {
       this.fireT -= dt;
-      this.takeDot(8 * dt, game, "#e54d3c");
+      this.takeDot(8 * (game.player.elemBoost || 1) * dt, game, "#e54d3c");
     }
     if (this.iceT > 0) this.iceT -= dt;
     const slow = this.iceT > 0 ? 0.5 : 1;
@@ -509,16 +541,18 @@ class Sword {
     this.y = game.player.y + Math.sin(this.angle + this.index * TAU / n) * orbit * 0.45;
     this.cooldown -= dt;
     if (this.cooldown <= 0) {
-      // 索敌范围：全屏上方区域（400px），御剑就该范围广
+      // 索敌范围：基础 400px，剑灵 +50% → 600px
+      const detect = 400 * (game.player.spirit ? 1.5 : 1);
       let best = null;
       let bestD = 999999;
       for (const e of game.enemies.active()) {
         if (e.dead) continue;
         const d = Util.dist2(this, e);
-        if (d < bestD && d < 400 * 400) { best = e; bestD = d; }
+        if (d < bestD && d < detect * detect) { best = e; bestD = d; }
       }
       if (best) {
-        best.takeDamage(15, false, game, false, false);
+        const dmg = 15 * (game.player.summonBoost || 1);
+        best.takeDamage(game.player.spirit ? dmg * 2 : dmg, false, game, false, false);
         this.target = best; // 直接引用敌人对象，死亡/失活时自动解除锁定
         this.slashT = 0.12;
         audio.sword();
@@ -578,6 +612,14 @@ class Player {
     this.crit = 0;
     this.fire = false;
     this.ice = false;
+    this.split = false;
+    this.volt = 0;
+    this.frostfire = false;
+    this.regen = 0;
+    this.shield = 0;
+    this.elemBoost = 1;
+    this.summonBoost = 1;
+    this.spirit = false;
     this.swords = [];
     this.inv = 0;
     this.fireT = 0;
@@ -587,6 +629,12 @@ class Player {
   canBeHit() { return this.inv <= 0; }
   hurt(dmg, game, kx, ky) {
     if (!this.canBeHit()) return;
+    // 护盾抵挡
+    if (this.shield > 0) {
+      this.shield -= 1;
+      for (let i = 0; i < 10; i++) game.particles.get(this.x, this.y, Util.rand(-70, 70), Util.rand(-90, 20), 0.5, "#9fe8ff", Util.rand(3, 6));
+      return;
+    }
     this.hp -= dmg;
     this.inv = CONFIG.INVINCIBLE_TIME;
     this.knockX += kx;
@@ -607,6 +655,7 @@ class Player {
     this.x = Util.clamp(this.x, 60, CONFIG.W - 60);
     this.y = Util.clamp(this.y, CONFIG.H * 0.73, CONFIG.H * 0.88);
     if (this.inv > 0) this.inv -= dt;
+    if (this.regen > 0) this.hp = Math.min(this.maxHp, this.hp + this.regen * dt);
     this.fireT -= dt;
     if (this.fireT <= 0) {
       this.fireT += 1 / this.fireRate;
@@ -647,32 +696,80 @@ class Player {
   }
 }
 
+// 稀有度：common 白 / rare 蓝 / epic 紫 / legendary 金
+const RARITY = {
+  common: { color: "#cfd4dc", weight: 55, label: "普通" },
+  rare: { color: "#5fc6ff", weight: 27, label: "稀有" },
+  epic: { color: "#c77dff", weight: 14, label: "史诗" },
+  legendary: { color: "#f7c948", weight: 4, label: "传说" }
+};
+
+// 流派：shot 弹道 / elem 元素 / summon 召唤 / surv 生存
+// icon 用简单字符图标（Canvas 绘制）
 const UPGRADES = [
-  { id: "damage", name: "强弓", desc: "弓箭伤害 +15%", max: Infinity, has: g => g.player.damage >= 999, apply: g => { g.player.damage = Math.min(999, g.player.damage * 1.15); } },
-  { id: "rate", name: "疾射", desc: "射击频率 +12%", max: 6, has: g => g.player.fireRate >= 6, apply: g => { g.player.fireRate = Math.min(6, g.player.fireRate * 1.12); } },
-  { id: "range", name: "远射", desc: "射击距离 +12%", max: 1500, has: g => g.player.range >= 1500, apply: g => { g.player.range = Math.min(1500, g.player.range * 1.12); } },
-  { id: "speed", name: "横移", desc: "横移速度 +12%", max: 700, has: g => g.player.moveSpeed >= 700, apply: g => { g.player.moveSpeed = Math.min(700, g.player.moveSpeed * 1.12); } },
-  { id: "hp", name: "生命", desc: "生命值 +30", max: 200, has: g => g.player.maxHp >= 200, apply: g => { g.player.maxHp = Math.min(200, g.player.maxHp + 30); g.player.hp = Math.min(g.player.maxHp, g.player.hp + 30); } },
-  { id: "multi", name: "多重箭", desc: "箭矢数量 +1", max: 5, has: g => g.player.arrowCount >= 5, apply: g => { g.player.arrowCount = Math.min(5, g.player.arrowCount + 1); } },
-  { id: "pierce", name: "穿透", desc: "穿透 +1", max: 3, has: g => g.player.pierce >= 3, apply: g => { g.player.pierce = Math.min(3, g.player.pierce + 1); } },
-  { id: "crit", name: "会心", desc: "暴击率 +12%", max: 0.6, has: g => g.player.crit >= 0.6, apply: g => { g.player.crit = Math.min(0.6, g.player.crit + 0.12); } },
-  { id: "fire", name: "火焰箭", desc: "命中灼烧 3 秒（每秒 8 伤）", max: 1, has: g => g.player.fire, apply: g => { g.player.fire = true; } },
-  { id: "ice", name: "冰霜箭", desc: "命中减速 50% 持续 2.5 秒", max: 1, has: g => g.player.ice, apply: g => { g.player.ice = true; } },
-  { id: "sword", name: "御剑", desc: "飞剑 +1（自动索敌斩击）", max: 3, has: g => g.player.swords.length >= 3, apply: g => { if (g.player.swords.length < 3) g.player.swords.push(new Sword(g.player.swords.length, g)); } },
-  { id: "fly", name: "骑剑加速", desc: "飞行速度 +12%", max: 0.6, has: g => g.flyBonus >= 0.6, apply: g => { g.flyBonus = Math.min(0.6, g.flyBonus + 0.12); } }
+  // ── 弹道系 ──
+  { id: "damage", name: "强弓", icon: "弓", rarity: "common", faction: "shot", desc: "弓箭伤害 +15%", max: Infinity, has: g => g.player.damage >= 999, apply: g => { g.player.damage = Math.min(999, g.player.damage * 1.15); } },
+  { id: "rate", name: "疾射", icon: "速", rarity: "rare", faction: "shot", desc: "射击频率 +12%", max: 6, has: g => g.player.fireRate >= 6, apply: g => { g.player.fireRate = Math.min(6, g.player.fireRate * 1.12); } },
+  { id: "multi", name: "多重箭", icon: "箭", rarity: "epic", faction: "shot", desc: "箭矢数量 +1", max: 5, has: g => g.player.arrowCount >= 5, apply: g => { g.player.arrowCount = Math.min(5, g.player.arrowCount + 1); } },
+  { id: "pierce", name: "穿透", icon: "穿", rarity: "epic", faction: "shot", desc: "箭矢穿透 +1", max: 3, has: g => g.player.pierce >= 3, apply: g => { g.player.pierce = Math.min(3, g.player.pierce + 1); } },
+  { id: "crit", name: "会心", icon: "暴", rarity: "rare", faction: "shot", desc: "暴击率 +12%（2 倍伤害）", max: 0.6, has: g => g.player.crit >= 0.6, apply: g => { g.player.crit = Math.min(0.6, g.player.crit + 0.12); } },
+  { id: "split", name: "分裂箭", icon: "裂", rarity: "legendary", faction: "shot", desc: "命中时分裂 2 支小箭（30% 伤害）", max: 1, has: g => g.player.split, apply: g => { g.player.split = true; } },
+  // ── 元素系 ──
+  { id: "fire", name: "火焰箭", icon: "火", rarity: "epic", faction: "elem", desc: "命中灼烧 3 秒（8/秒）", max: 1, has: g => g.player.fire, apply: g => { g.player.fire = true; } },
+  { id: "ice", name: "冰霜箭", icon: "冰", rarity: "epic", faction: "elem", desc: "命中减速 50% 2.5 秒", max: 1, has: g => g.player.ice, apply: g => { g.player.ice = true; } },
+  { id: "volt", name: "雷电箭", icon: "雷", rarity: "legendary", faction: "elem", desc: "命中弹射至最近敌人（50% 伤害）", max: 2, has: g => g.player.volt >= 2, apply: g => { g.player.volt = (g.player.volt || 0) + 1; } },
+  { id: "frostfire", name: "冰火共鸣", icon: "熔", rarity: "legendary", faction: "elem", desc: "冰冻中的敌人受火伤时爆炸", max: 1, has: g => g.player.frostfire, apply: g => { g.player.frostfire = true; } },
+  // ── 召唤系 ──
+  { id: "sword", name: "御剑", icon: "剑", rarity: "epic", faction: "summon", desc: "飞剑 +1（自动索敌斩击）", max: 3, has: g => g.player.swords.length >= 3, apply: g => { if (g.player.swords.length < 3) g.player.swords.push(new Sword(g.player.swords.length, g)); } },
+  { id: "fly", name: "骑剑加速", icon: "骑", rarity: "rare", faction: "summon", desc: "飞行速度 +12%", max: 0.6, has: g => g.flyBonus >= 0.6, apply: g => { g.flyBonus = Math.min(0.6, g.flyBonus + 0.12); } },
+  { id: "spirit", name: "剑灵", icon: "灵", rarity: "legendary", faction: "summon", desc: "御剑伤害翻倍，索敌范围 +50%", max: 1, has: g => g.player.spirit, apply: g => { g.player.spirit = true; } },
+  // ── 生存系 ──
+  { id: "hp", name: "生命", icon: "命", rarity: "common", faction: "surv", desc: "生命值 +30", max: 200, has: g => g.player.maxHp >= 200, apply: g => { g.player.maxHp = Math.min(200, g.player.maxHp + 30); g.player.hp = Math.min(g.player.maxHp, g.player.hp + 30); } },
+  { id: "speed", name: "横移", icon: "移", rarity: "common", faction: "surv", desc: "横移速度 +12%", max: 700, has: g => g.player.moveSpeed >= 700, apply: g => { g.player.moveSpeed = Math.min(700, g.player.moveSpeed * 1.12); } },
+  { id: "range", name: "远射", icon: "射", rarity: "common", faction: "surv", desc: "射击距离 +12%", max: 1500, has: g => g.player.range >= 1500, apply: g => { g.player.range = Math.min(1500, g.player.range * 1.12); } },
+  { id: "regen", name: "再生", icon: "愈", rarity: "rare", faction: "surv", desc: "每秒回复 2 生命", max: 1, has: g => g.player.regen > 0, apply: g => { g.player.regen = (g.player.regen || 0) + 2; } },
+  { id: "shield", name: "护盾", icon: "盾", rarity: "epic", faction: "surv", desc: "获得护盾，抵挡一次伤害", max: 3, has: g => g.player.shield >= 3, apply: g => { g.player.shield = (g.player.shield || 0) + 1; } }
 ];
 
-function rollGate() {
-  // 只从「未满级」的升级里抽，防止浪费
+// 流派觉醒：连选 3 个同系技能触发
+const FACTION_AWAKEN = {
+  shot: { name: "箭雨风暴", desc: "射速 +20%，箭矢 +1", apply: g => { g.player.fireRate = Math.min(6, g.player.fireRate * 1.2); g.player.arrowCount = Math.min(5, g.player.arrowCount + 1); } },
+  elem: { name: "元素湮灭", desc: "元素效果 +50%（灼烧 12/秒）", apply: g => { g.player.elemBoost = 1.5; } },
+  summon: { name: "万剑归宗", desc: "御剑伤害 +50%，索敌 +25%", apply: g => { g.player.summonBoost = 1.5; } },
+  surv: { name: "不灭之体", desc: "回复 50% 生命，上限 +40", apply: g => { g.player.maxHp = Math.min(240, g.player.maxHp + 40); g.player.hp = Math.min(g.player.maxHp, g.player.hp + g.player.maxHp * 0.5); } }
+};
+
+// 三选一：按稀有度权重抽取 3 个不重复升级
+function rollChoices() {
   const avail = UPGRADES.filter(u => !u.has(game));
-  if (avail.length < 2) {
-    // 全部满级：回血/回盾兜底
-    return [UPGRADES[0], UPGRADES[4]];
+  const picks = [];
+  const usedIds = new Set();
+  const attempt = () => {
+    // 先按权重抽稀有度，再从该稀有度（及更高稀有度兜底）的可用池抽
+    const pool = avail.filter(u => !usedIds.has(u.id));
+    if (pool.length === 0) return null;
+    let total = 0;
+    for (const u of pool) total += RARITY[u.rarity].weight;
+    let roll = Math.random() * total;
+    for (const u of pool) {
+      roll -= RARITY[u.rarity].weight;
+      if (roll <= 0) return u;
+    }
+    return pool[pool.length - 1];
+  };
+  while (picks.length < 3) {
+    const u = attempt();
+    if (!u) break;
+    picks.push(u);
+    usedIds.add(u.id);
   }
-  const a = Util.pick(avail);
-  let b = Util.pick(avail);
-  while (b.id === a.id) b = Util.pick(avail);
-  return [a, b];
+  // 不够 3 个时用回血兜底
+  while (picks.length < 3) {
+    const fallback = UPGRADES.find(u => u.id === "hp" && !usedIds.has(u.id)) || UPGRADES.find(u => u.id === "damage");
+    picks.push(fallback);
+    usedIds.add(fallback.id);
+  }
+  return picks;
 }
 
 class Game {
@@ -707,6 +804,11 @@ class Game {
     this.chest = null;
     this.ring = null;
     this.shake = 0;
+    this.choices = null;
+    this.factionCount = {};
+    this.factionAwakened = {};
+    this.awakenMsg = "";
+    this.awakenT = 0;
     this.decor.length = 0;
     this.leaves.length = 0;
     for (let i = 0; i < 38; i++) this.decor.push(this.makeDecor(Util.rand(0, CONFIG.H), Math.random() < 0.58 ? "tree" : Math.random() < 0.78 ? "rock" : "fence"));
@@ -737,13 +839,15 @@ class Game {
     if (this.state !== "PLAY") {
       this.updateBackdrop(dt);
       for (const p of this.particles.active()) p.update(dt);
+      if (this.chooseT > 0) this.chooseT -= dt;
+      if (this.awakenT > 0) this.awakenT -= dt;
       return;
     }
     this.flySpeed = this.getFlySpeed();
     this.distance += this.flySpeed * dt / 3;
     this.wave = Math.floor(this.distance / CONFIG.WAVE_LEN) + 1;
     if (this.wave > this.spawnedWave && !this.boss) this.spawnWave();
-    if (this.distance >= this.nextGateM && !this.gate) this.spawnGate();
+    if (this.distance >= this.nextGateM && !this.gate && !this.choices) this.spawnGate();
     this.updateBackdrop(dt);
     this.player.update(dt, this);
     for (const a of this.arrows.active()) a.update(dt, this);
@@ -809,32 +913,43 @@ class Game {
     }
   }
   spawnGate() {
-    const [left, right] = rollGate();
-    this.gate = {
-      y: -90,
-      passed: false,
-      left: { x: CONFIG.W / 2 - 105, up: left, r: 54 },
-      right: { x: CONFIG.W / 2 + 105, up: right, r: 54 }
-    };
+    // 升级从「路上穿门」改为「暂停三选一弹卡」
+    this.choices = rollChoices();
+    this.state = "CHOOSE";
+    this.chooseT = 0.35; // 卡片弹出动画
     this.nextGateM += CONFIG.GATE_EVERY;
+    audio.upgrade();
+  }
+  chooseUpgrade(idx) {
+    const up = this.choices && this.choices[idx];
+    if (!up) return;
+    this.applyUpgrade(up);
+    this.choices = null;
+    this.state = "PLAY";
   }
   updateGate(dt) {
+    // 原穿门逻辑废弃（升级改为弹卡），保留方法占位避免误调用
     if (!this.gate) return;
     this.gate.y += this.flySpeed * dt;
-    const gy = this.gate.y;
-    for (const side of [this.gate.left, this.gate.right]) {
-      const c = { x: side.x, y: gy, r: side.r };
-      if (!this.gate.passed && Util.circleHit(this.player, c)) {
-        this.applyUpgrade(side.up);
-        this.gate.passed = true;
-        this.gate = null;
-        return;
-      }
-    }
-    if (gy > CONFIG.H + 90) this.gate = null;
+    if (this.gate.y > CONFIG.H + 90) this.gate = null;
   }
   applyUpgrade(up) {
     up.apply(this);
+    // 流派计数 + 觉醒检测（每选 3 个同系触发）
+    this.factionCount[up.faction] = (this.factionCount[up.faction] || 0) + 1;
+    if (this.factionCount[up.faction] % 3 === 0 && !this.factionAwakened[up.faction]) {
+      this.factionAwakened[up.faction] = true;
+      const aw = FACTION_AWAKEN[up.faction];
+      if (aw) {
+        aw.apply(this);
+        this.awakenMsg = `${aw.name}！${aw.desc}`;
+        this.awakenT = 2.6;
+        audio.boss();
+        this.shake = Math.max(this.shake || 0, 12);
+        this.ring = { x: this.player.x, y: this.player.y, r: 10, maxR: 260, life: 0.8 };
+        for (let i = 0; i < 60; i++) this.particles.get(this.player.x, this.player.y, Util.rand(-220, 220), Util.rand(-260, 80), 1.0, Util.pick(["#f7c948", "#c77dff", "#5fc6ff"]), Util.rand(4, 11));
+      }
+    }
     // 升级演出：金色大字 + 扩散光圈 + 冲击粒子 + 屏幕微震
     this.flashMessage(`${up.name}：${up.desc}`);
     this.particles.get(this.player.x, this.player.y, 0, 0, 0.9, "#f7c948", 10, up.name, false); // 大字
@@ -874,7 +989,10 @@ class Game {
     const spread = n === 1 ? 0 : 0.34;
     for (let i = 0; i < n; i++) {
       const t = n === 1 ? 0 : (i / (n - 1) - 0.5) * spread;
-      this.arrows.get(this.player.x, this.player.y - 36, t, this.player.damage, this.player.range, this.player.pierce, this.player.crit, this.player.fire, this.player.ice);
+      const a = this.arrows.get(this.player.x, this.player.y - 36, t, this.player.damage, this.player.range, this.player.pierce, this.player.crit, this.player.fire, this.player.ice);
+      a.split = this.player.split;
+      a.volt = this.player.volt;
+      a.frostfire = this.player.frostfire;
     }
     audio.shoot();
   }
@@ -912,6 +1030,26 @@ class Game {
     }
     for (const p of this.particles.active()) p.render(g);
     drawUI(g, this);
+    // 三选一卡牌界面（画在最上层）
+    if (this.state === "CHOOSE" && this.choices) {
+      drawChoiceCards(g, this);
+    }
+    // 觉醒大字
+    if (this.awakenT > 0 && this.awakenMsg) {
+      g.save();
+      g.globalAlpha = Math.min(1, this.awakenT);
+      g.textAlign = "center";
+      g.shadowBlur = 26;
+      g.shadowColor = "#f7c948";
+      g.font = "bold 46px Microsoft YaHei, sans-serif";
+      g.fillStyle = "#ffd56a";
+      g.fillText(this.awakenMsg.split("！")[0] + "！", CONFIG.W / 2, CONFIG.H * 0.38);
+      g.shadowBlur = 0;
+      g.font = "bold 22px Microsoft YaHei, sans-serif";
+      g.fillStyle = "#fff0c4";
+      g.fillText(this.awakenMsg.split("！").slice(1).join("！"), CONFIG.W / 2, CONFIG.H * 0.38 + 44);
+      g.restore();
+    }
     g.restore();
   }
 }
@@ -1162,6 +1300,93 @@ function drawGate(g, gate) {
   }
 }
 
+function drawChoiceCards(g, state) {
+  const cards = state.choices;
+  const fade = Util.clamp(1 - state.chooseT / 0.35, 0, 1);
+  const pop = 1 + Math.max(0, state.chooseT - 0.25) * 2.2;
+  const cardW = 146, cardH = 224, gap = 18;
+  const total = cardW * 3 + gap * 2;
+  const startX = (CONFIG.W - total) / 2;
+  const y = CONFIG.H * 0.42 - cardH / 2;
+  const FACTION_LABEL = { shot: "弹道", elem: "元素", summon: "召唤", surv: "生存" };
+
+  // 背景遮罩
+  g.save();
+  g.globalAlpha = 0.72 * fade;
+  g.fillStyle = "#05070a";
+  g.fillRect(0, 0, CONFIG.W, CONFIG.H);
+  g.globalAlpha = fade;
+  g.textAlign = "center";
+  g.fillStyle = "#f5ecd9";
+  g.font = "bold 30px Microsoft YaHei, sans-serif";
+  g.fillText("选择一项强化", CONFIG.W / 2, y - 44);
+
+  for (let i = 0; i < cards.length; i++) {
+    const up = cards[i];
+    const rar = RARITY[up.rarity];
+    const cx = startX + i * (cardW + gap) + cardW / 2;
+    // 弹出动画
+    const cy = y + Math.sin((i + 0.5) * 0.9) * (1 - fade) * 40;
+    g.save();
+    g.translate(cx, cy);
+    g.scale(pop, pop);
+    // 稀有度外框发光
+    g.shadowBlur = 22;
+    g.shadowColor = rar.color;
+    // 卡片主体
+    g.fillStyle = "#1a2029";
+    roundRect(g, -cardW / 2, 0, cardW, cardH, 12);
+    g.fill();
+    g.shadowBlur = 0;
+    g.lineWidth = 3;
+    g.strokeStyle = rar.color;
+    roundRect(g, -cardW / 2, 0, cardW, cardH, 12);
+    g.stroke();
+    // 稀有度顶部色条
+    g.fillStyle = rar.color;
+    g.globalAlpha = 0.22;
+    roundRect(g, -cardW / 2, 0, cardW, 46, 12);
+    g.fill();
+    g.globalAlpha = fade;
+    // 图标圆底
+    g.fillStyle = "rgba(0,0,0,0.35)";
+    g.beginPath();
+    g.arc(0, 74, 30, 0, TAU);
+    g.fill();
+    g.fillStyle = rar.color;
+    g.font = "bold 32px Microsoft YaHei, sans-serif";
+    g.fillText(up.icon, 0, 86);
+    // 名称
+    g.fillStyle = rar.color;
+    g.font = "bold 22px Microsoft YaHei, sans-serif";
+    g.fillText(up.name, 0, 132);
+    // 稀有度标签
+    g.fillStyle = rar.color;
+    g.globalAlpha = 0.9;
+    g.font = "12px Microsoft YaHei, sans-serif";
+    g.fillText(rar.label, 0, 152);
+    g.globalAlpha = fade;
+    // 描述（两行）
+    g.fillStyle = "#d8dde6";
+    g.font = "14px Microsoft YaHei, sans-serif";
+    wrapText(g, up.desc, 0, 180, cardW - 24, 20);
+    // 流派标签
+    g.fillStyle = "rgba(255,255,255,0.14)";
+    roundRect(g, -34, 196, 68, 20, 10);
+    g.fill();
+    g.fillStyle = "#b9c2d0";
+    g.font = "12px Microsoft YaHei, sans-serif";
+    g.fillText(FACTION_LABEL[up.faction] || up.faction, 0, 210);
+    g.restore();
+  }
+  // 底部提示
+  g.fillStyle = "#8a94a3";
+  g.font = "14px Microsoft YaHei, sans-serif";
+  g.fillText("点击卡片选择 · 键盘 1/2/3", CONFIG.W / 2, y + cardH + 40);
+  g.restore();
+}
+
+
 function drawChest(g, c) {
   const s = Util.worldScale(c.y);
   drawShadow(g, c.x, c.y + 26 * s, 38 * s, 11 * s, 0.36);
@@ -1223,7 +1448,7 @@ function drawHud(g, state) {
   g.fillText(`${Math.floor(state.distance)}m  ${state.score}分`, 510, 42);
   g.font = "15px Microsoft YaHei, sans-serif";
   g.fillText(`第 ${state.wave} 波  击杀 ${state.kills}`, 510, 66);
-  g.fillText(`御剑 ${state.player.swords.length}/3`, 510, 90);
+  g.fillText(`御剑 ${state.player.swords.length}/3${state.player.shield > 0 ? `  盾${state.player.shield}` : ""}`, 510, 90);
   drawMute(g, state);
   if (state.boss && state.boss.active) {
     const p = Util.clamp(state.boss.hp / state.boss.maxHp, 0, 1);
@@ -1265,13 +1490,13 @@ function drawMenu(g, state) {
   g.shadowBlur = 0;
   g.fillStyle = "#d4c6af";
   g.font = "20px Microsoft YaHei, sans-serif";
-  g.fillText("v2.0  自动飞行 · 左右穿门 · 箭剑齐发", CONFIG.W / 2, 292);
+  g.fillText("v2.1  自动飞行 · 三选一强化 · 流派觉醒", CONFIG.W / 2, 292);
   drawButton(g, CONFIG.W / 2 - 105, 376, 210, 62, "开始");
   g.fillStyle = "#f1dfbf";
   g.font = "18px Microsoft YaHei, sans-serif";
   g.fillText(`最高分：${state.highScore}m`, CONFIG.W / 2, 478);
   g.font = "16px Microsoft YaHei, sans-serif";
-  const lines = ["←→ / AD 控制横移，触摸拖拽控制角色 X", "每 250m 穿过左/右木牌获得对应升级", "每 5 波 Boss，击杀后穿过金色宝箱拿大奖励"];
+  const lines = ["←→ / AD 控制横移，触摸拖拽控制角色 X", "每 240m 暂停弹出 3 张强化卡（白/蓝/紫/金稀有度）", "连选 3 个同系强化触发流派觉醒", "每 5 波 Boss，击杀后穿过金色宝箱拿大奖励"];
   lines.forEach((line, i) => g.fillText(line, CONFIG.W / 2, 558 + i * 34));
   g.fillStyle = "#a9977d";
   g.font = "14px Microsoft YaHei, sans-serif";
@@ -1358,6 +1583,21 @@ function activateAt(x, y) {
     audio.toggle();
     return;
   }
+  if (game.state === "CHOOSE" && game.choices) {
+    // 三张卡：与 drawChoiceCards 布局一致
+    const cardW = 146, cardH = 224, gap = 18;
+    const total = cardW * 3 + gap * 2;
+    const startX = (CONFIG.W - total) / 2;
+    const y0 = CONFIG.H * 0.42 - cardH / 2;
+    for (let i = 0; i < 3; i++) {
+      const cx = startX + i * (cardW + gap);
+      if (x >= cx && x <= cx + cardW && y >= y0 && y <= y0 + cardH) {
+        game.chooseUpgrade(i);
+        return;
+      }
+    }
+    return;
+  }
   if (game.state === "MENU") {
     if (x >= CONFIG.W / 2 - 105 && x <= CONFIG.W / 2 + 105 && y >= 376 && y <= 438) game.start();
   } else if (game.state === "GAME_OVER") {
@@ -1368,6 +1608,12 @@ function activateAt(x, y) {
 window.addEventListener("keydown", e => {
   if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A") game.input.left = 1;
   if (e.key === "ArrowRight" || e.key === "d" || e.key === "D") game.input.right = 1;
+  // 三选一：键盘 1/2/3 直接选择
+  if (game.state === "CHOOSE" && game.choices) {
+    if (e.key === "1") { game.chooseUpgrade(0); return; }
+    if (e.key === "2") { game.chooseUpgrade(1); return; }
+    if (e.key === "3") { game.chooseUpgrade(2); return; }
+  }
   if (e.key === " " || e.key === "Enter") {
     if (game.state !== "PLAY") game.start();
   }
