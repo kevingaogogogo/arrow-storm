@@ -94,6 +94,167 @@ const CONFIG = {
 };
 
 const TAU = Math.PI * 2;
+const LEADERBOARD_ID = "019fc5b1-da1d-77b0-80c7-697b169f0d1c";
+const LEADERBOARD_CACHE_MS = 5 * 60 * 1000;
+
+const Leaderboard = {
+  tabs: [
+    { key: "chapter", label: "关卡榜" },
+    { key: "totalDmg", label: "伤害榜" },
+    { key: "tankDmg", label: "抗伤榜" },
+    { key: "gold", label: "金币榜" }
+  ],
+  data: null,
+  status: "idle",
+  champion: "暂无王者",
+  get id() {
+    return localStorage.getItem("arrowStormLeaderboardId") || LEADERBOARD_ID;
+  },
+  set id(value) {
+    if (value) localStorage.setItem("arrowStormLeaderboardId", value);
+  },
+  sanitizeName(name) {
+    return Array.from(String(name || "").trim()).slice(0, 10).join("") || "无名箭客";
+  },
+  getPlayerName() {
+    return this.sanitizeName(localStorage.getItem("arrowStormPlayerName") || "");
+  },
+  ensurePlayerName() {
+    const saved = this.getPlayerName();
+    if (saved && saved !== "无名箭客") return saved;
+    if (typeof DEMO !== "undefined" && DEMO) {
+      localStorage.setItem("arrowStormPlayerName", "DemoAI");
+      return "DemoAI";
+    }
+    const input = prompt("请输入玩家名称（最多10字）", "");
+    const name = this.sanitizeName(input);
+    localStorage.setItem("arrowStormPlayerName", name);
+    return name;
+  },
+  normalize(data) {
+    const source = data && Array.isArray(data.players) ? data.players : [];
+    return {
+      version: 1,
+      players: source.map(p => ({
+        name: this.sanitizeName(p.name),
+        chapter: Math.max(1, Math.floor(Number(p.chapter) || 1)),
+        room: Math.max(0, Math.floor(Number(p.room) || 0)),
+        totalDmg: Math.max(0, Math.floor(Number(p.totalDmg) || 0)),
+        tankDmg: Math.max(0, Math.floor(Number(p.tankDmg) || 0)),
+        gold: Math.max(0, Math.floor(Number(p.gold) || 0)),
+        ts: Math.max(0, Number(p.ts) || Date.now())
+      }))
+    };
+  },
+  async request(method, id, body) {
+    const options = { method };
+    if (body) {
+      options.headers = { "Content-Type": "application/json" };
+      options.body = JSON.stringify(body);
+    }
+    return fetch(`https://jsonblob.com/api/jsonBlob/${id}`, options);
+  },
+  async createBlob(initial) {
+    const res = await fetch("https://jsonblob.com/api/jsonBlob", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(initial || { version: 1, players: [] })
+    });
+    if (!res.ok) throw new Error("leaderboard create failed");
+    const location = res.headers.get("Location") || "";
+    const id = location.split("/").filter(Boolean).pop();
+    if (id) this.id = id;
+    return id || this.id;
+  },
+  async load(options = {}) {
+    const silent = !!options.silent;
+    if (!silent) this.status = "loading";
+    try {
+      let id = this.id;
+      let res = await this.request("GET", id);
+      if (res.status === 404) {
+        id = await this.createBlob({ version: 1, players: [] });
+        res = await this.request("GET", id);
+      }
+      if (!res.ok) throw new Error("leaderboard load failed");
+      this.data = this.normalize(await res.json());
+      this.status = "ready";
+      this.cacheChampion();
+      return this.data;
+    } catch (_) {
+      if (!silent) this.status = "error";
+      throw _;
+    }
+  },
+  isProgressBetter(a, b) {
+    if ((a.chapter || 1) !== (b.chapter || 1)) return (a.chapter || 1) > (b.chapter || 1);
+    if ((a.room || 0) !== (b.room || 0)) return (a.room || 0) > (b.room || 0);
+    return (a.ts || 0) < (b.ts || 0);
+  },
+  mergeRecord(players, record) {
+    const clean = this.normalize({ players: [record] }).players[0];
+    const idx = players.findIndex(p => p.name === clean.name);
+    if (idx < 0) return players.concat(clean);
+    const prev = players[idx];
+    const merged = Object.assign({}, prev);
+    if (this.isProgressBetter(clean, prev)) {
+      merged.chapter = clean.chapter;
+      merged.room = clean.room;
+      merged.ts = clean.ts;
+    } else if (clean.chapter === prev.chapter && clean.room === prev.room) {
+      merged.ts = Math.min(prev.ts || clean.ts, clean.ts);
+    }
+    merged.totalDmg = Math.max(prev.totalDmg || 0, clean.totalDmg || 0);
+    merged.tankDmg = Math.max(prev.tankDmg || 0, clean.tankDmg || 0);
+    merged.gold = Math.max(prev.gold || 0, clean.gold || 0);
+    players[idx] = merged;
+    return players;
+  },
+  async submit(record) {
+    try {
+      const name = this.sanitizeName(record && record.name);
+      const guardKey = `arrowStormLeaderboardSubmitAt:${name}`;
+      const last = Number(localStorage.getItem(guardKey) || "0");
+      const now = Date.now();
+      if (now - last < 60000) return;
+      localStorage.setItem(guardKey, String(now));
+      const board = await this.load({ silent: true }).catch(() => ({ version: 1, players: [] }));
+      const next = this.normalize(board);
+      next.players = this.mergeRecord(next.players, Object.assign({}, record, { name }));
+      let res = await this.request("PUT", this.id, next);
+      if (res.status === 404) {
+        const id = await this.createBlob(next);
+        res = await this.request("PUT", id, next);
+      }
+      if (res.ok) {
+        this.data = next;
+        this.status = "ready";
+        this.cacheChampion();
+      }
+    } catch (_) {}
+  },
+  getTop(kind, n = 20) {
+    const players = (this.data && this.data.players ? this.data.players : []).slice();
+    if (kind === "chapter") {
+      players.sort((a, b) => (b.chapter - a.chapter) || (b.room - a.room) || (a.ts - b.ts));
+    } else {
+      players.sort((a, b) => ((b[kind] || 0) - (a[kind] || 0)) || (a.ts - b.ts));
+    }
+    return players.slice(0, n);
+  },
+  cacheChampion() {
+    const top = this.getTop("chapter", 1)[0];
+    this.champion = top ? `👑 关卡之王: ${top.name} · 第${top.chapter}章` : "暂无王者";
+    localStorage.setItem("arrowStormChampionCache", JSON.stringify({ text: this.champion, ts: Date.now() }));
+  },
+  loadChampion() {
+    try {
+      const cached = JSON.parse(localStorage.getItem("arrowStormChampionCache") || "null");
+      if (cached && Date.now() - cached.ts < LEADERBOARD_CACHE_MS) this.champion = cached.text || "暂无王者";
+    } catch (_) {}
+    this.load({ silent: true }).catch(() => {});
+  }
+};
 
 // ── 主题场景系统：按 Boss 波次切换，闯关感 ──
 // 每 5 波一个场景（与 Boss 同步）：森林 → 沙漠 → 雪原 → 岩浆 → 暗域 → 循环
@@ -964,6 +1125,7 @@ class Player {
       return;
     }
     this.hp -= dmg;
+    game.totalTank = (game.totalTank || 0) + Math.max(0, Math.round(dmg || 0));
     this.inv = CONFIG.INVINCIBLE_TIME;
     this.knockX += kx;
     this.knockY += ky;
@@ -1351,6 +1513,7 @@ class Game {
     this.message = "";
     this.messageT = 0;
     this.resetWorld();
+    Leaderboard.loadChampion();
   }
   resetWorld() {
     this.distance = 0;
@@ -1364,6 +1527,8 @@ class Game {
     this.roomTransition = 0;
     this.settlementBonus = 0;
     this.settlementBanked = false;
+    this.totalDmg = 0;
+    this.totalTank = 0;
     this.wave = 1;
     this.spawnedWave = 0;
     this.flyBonus = 0;
@@ -1392,6 +1557,7 @@ class Game {
   }
   start() {
     audio.ensure();
+    this.playerName = Leaderboard.ensurePlayerName();
     this.state = "PLAY";
     this.player.reset();
     applyMetaProgression(this.player); // 局外成长 → 初始属性
@@ -1408,11 +1574,27 @@ class Game {
   }
   openShop() { audio.ensure(); this.state = "SHOP"; this.shopTab = 0; }
   closeShop() { this.state = "MENU"; }
+  openLeaderboard() {
+    audio.ensure();
+    this.state = "LEADERBOARD";
+    this.leaderboardTab = this.leaderboardTab || "chapter";
+    Leaderboard.load().catch(() => {});
+  }
+  closeLeaderboard() { this.state = "MENU"; }
   gameOver() {
     if (this.state !== "PLAY") return;
     this.state = "GAME_OVER";
     audio.death();
     this.bankRunGold();
+    Leaderboard.submit({
+      name: this.playerName || Leaderboard.getPlayerName(),
+      chapter: this.chapter,
+      room: this.roomIndex,
+      totalDmg: this.totalDmg || 0,
+      tankDmg: this.totalTank || 0,
+      gold: (this.runGold || 0) + (this.settlementBonus || 0),
+      ts: Date.now()
+    });
     this.highScore = Math.max(this.highScore, Math.floor(this.distance));
     localStorage.setItem("arrowStormHighScore", String(this.highScore));
     SaveSystem.data.bestWave = Math.max(SaveSystem.data.bestWave || 0, this.wave);
@@ -1707,6 +1889,7 @@ class Game {
     audio.shoot();
   }
   damageNumber(x, y, amount, crit) {
+    this.totalDmg = (this.totalDmg || 0) + Math.max(0, Math.round(amount || 0));
     this.particles.get(x, y, Util.rand(-18, 18), -78, 0.72, CONFIG.COLORS.orange, 1, String(amount), crit);
   }
   flashMessage(text) {
@@ -2768,6 +2951,7 @@ function drawUI(g, state) {
     g.restore();
   }
   if (state.state === "MENU") drawMenu(g, state);
+  if (state.state === "LEADERBOARD") drawLeaderboard(g, state);
   if (state.state === "GAME_OVER") drawGameOver(g, state);
 }
 
@@ -2854,7 +3038,10 @@ function drawMenu(g, state) {
   g.shadowBlur = 6 + 6 * pulse;
   g.fillStyle = "#d4c6af";
   g.font = "20px Microsoft YaHei, sans-serif";
-  g.fillText("v3.0  房间闯关 · 局内商店 · 专属Boss", CONFIG.W / 2, 292);
+  g.fillText("v3.1  房间闯关 · 全球排行榜 · 专属Boss", CONFIG.W / 2, 292);
+  g.fillStyle = "#ffe59a";
+  g.font = "bold 18px Microsoft YaHei, sans-serif";
+  g.fillText(Leaderboard.champion || "暂无王者", CONFIG.W / 2, 326);
   g.shadowBlur = 0;
   drawButton(g, CONFIG.W / 2 - 105, 376, 210, 62, "开始");
   // 商店按钮 + 金币
@@ -2866,15 +3053,96 @@ function drawMenu(g, state) {
   g.fillStyle = "#f7c948";
   g.font = "bold 18px Microsoft YaHei, sans-serif";
   g.fillText(`商店 · ${SaveSystem.data.gold} 💰`, CONFIG.W / 2, 492);
+  g.fillStyle = "rgba(247,201,72,0.16)";
+  roundRect(g, CONFIG.W / 2 - 88, 526, 176, 46, 10); g.fill();
+  g.strokeStyle = "rgba(247,201,72,0.5)";
+  g.lineWidth = 2;
+  roundRect(g, CONFIG.W / 2 - 88, 526, 176, 46, 10); g.stroke();
+  g.fillStyle = "#ffe59a";
+  g.font = "bold 18px Microsoft YaHei, sans-serif";
+  g.fillText("排行榜", CONFIG.W / 2, 556);
   g.fillStyle = "#f1dfbf";
   g.font = "18px Microsoft YaHei, sans-serif";
-  g.fillText(`最高进度：第 ${SaveSystem.data.chapter || 1} 章`, CONFIG.W / 2, 556);
+  g.fillText(`最高进度：第 ${SaveSystem.data.chapter || 1} 章`, CONFIG.W / 2, 612);
   g.font = "16px Microsoft YaHei, sans-serif";
   const lines = ["←→ / AD 控制横移，触摸拖拽控制角色 X", "每章 6 房：战斗 · 战斗 · 商店 · 战斗 · 精英 · BOSS", "清房后三选一强化，商店房消费局内金币", "击杀章节 Boss 后切换场景并进入下一章"];
-  lines.forEach((line, i) => g.fillText(line, CONFIG.W / 2, 626 + i * 34));
+  lines.forEach((line, i) => g.fillText(line, CONFIG.W / 2, 666 + i * 34));
   g.fillStyle = "#a9977d";
   g.font = "14px Microsoft YaHei, sans-serif";
-  g.fillText(`音效：${audio.muted ? "关" : "开"}  点击左上角音符切换`, CONFIG.W / 2, 786);
+  g.fillText(`音效：${audio.muted ? "关" : "开"}  点击左上角音符切换`, CONFIG.W / 2, 824);
+  g.restore();
+}
+
+function drawLeaderboard(g, state) {
+  g.save();
+  g.fillStyle = "rgba(7,12,8,0.88)";
+  g.fillRect(0, 0, CONFIG.W, CONFIG.H);
+  g.textAlign = "center";
+  g.fillStyle = "#fff0c4";
+  g.font = "bold 42px Microsoft YaHei, sans-serif";
+  g.fillText("全球排行榜", CONFIG.W / 2, 92);
+  g.fillStyle = "#a9977d";
+  g.font = "15px Microsoft YaHei, sans-serif";
+  g.fillText("每榜前 20 名 · 同名玩家合并最佳记录", CONFIG.W / 2, 122);
+
+  const tabY = 154, tabW = 112, tabH = 42, gap = 8;
+  const startX = (CONFIG.W - tabW * Leaderboard.tabs.length - gap * (Leaderboard.tabs.length - 1)) / 2;
+  const active = state.leaderboardTab || "chapter";
+  Leaderboard.tabs.forEach((tab, i) => {
+    const x = startX + i * (tabW + gap);
+    g.fillStyle = active === tab.key ? "rgba(247,201,72,0.28)" : "rgba(168,101,255,0.16)";
+    roundRect(g, x, tabY, tabW, tabH, 8); g.fill();
+    g.strokeStyle = active === tab.key ? "rgba(247,201,72,0.7)" : "rgba(168,101,255,0.38)";
+    g.lineWidth = 2;
+    roundRect(g, x, tabY, tabW, tabH, 8); g.stroke();
+    g.fillStyle = active === tab.key ? "#ffe59a" : "#f1dfbf";
+    g.font = "bold 16px Microsoft YaHei, sans-serif";
+    g.fillText(tab.label, x + tabW / 2, tabY + 27);
+  });
+
+  if (Leaderboard.status === "loading") {
+    g.fillStyle = "#d4c6af";
+    g.font = "22px Microsoft YaHei, sans-serif";
+    g.fillText("正在连接排行榜...", CONFIG.W / 2, 420);
+  } else if (Leaderboard.status === "error") {
+    g.fillStyle = "#ffb096";
+    g.font = "22px Microsoft YaHei, sans-serif";
+    g.fillText("暂时无法连接", CONFIG.W / 2, 420);
+  } else {
+    const rows = Leaderboard.getTop(active, 20);
+    if (!rows.length) {
+      g.fillStyle = "#d4c6af";
+      g.font = "22px Microsoft YaHei, sans-serif";
+      g.fillText("暂无数据", CONFIG.W / 2, 420);
+    } else {
+      g.textAlign = "left";
+      g.font = "bold 15px Microsoft YaHei, sans-serif";
+      g.fillStyle = "#a9977d";
+      g.fillText("名次", 56, 222);
+      g.fillText("玩家", 130, 222);
+      g.textAlign = "right";
+      g.fillText("成绩", 486, 222);
+      rows.forEach((p, i) => {
+        const y = 260 + i * 28;
+        if (i === 0) {
+          g.fillStyle = "rgba(247,201,72,0.18)";
+          roundRect(g, 36, y - 20, 468, 24, 7); g.fill();
+        }
+        g.textAlign = "left";
+        g.fillStyle = i === 0 ? "#ffe59a" : "#f1dfbf";
+        g.font = i === 0 ? "bold 17px Microsoft YaHei, sans-serif" : "16px Microsoft YaHei, sans-serif";
+        g.fillText(String(i + 1), 62, y);
+        g.fillText(p.name, 130, y);
+        g.textAlign = "right";
+        const value = active === "chapter"
+          ? `第${p.chapter}章 · 房间${(p.room || 0) + 1}`
+          : String(Math.floor(p[active] || 0));
+        g.fillText(value, 486, y);
+      });
+    }
+  }
+
+  drawButton(g, CONFIG.W / 2 - 70, 850, 140, 54, "返回");
   g.restore();
 }
 
@@ -3003,6 +3271,18 @@ function activateAt(x, y) {
   if (game.state === "MENU") {
     if (x >= CONFIG.W / 2 - 105 && x <= CONFIG.W / 2 + 105 && y >= 376 && y <= 438) game.start();
     else if (x >= CONFIG.W / 2 - 88 && x <= CONFIG.W / 2 + 88 && y >= 462 && y <= 508) game.openShop();
+    else if (x >= CONFIG.W / 2 - 88 && x <= CONFIG.W / 2 + 88 && y >= 526 && y <= 572) game.openLeaderboard();
+  } else if (game.state === "LEADERBOARD") {
+    const tabY = 154, tabW = 112, tabH = 42, gap = 8;
+    const startX = (CONFIG.W - tabW * Leaderboard.tabs.length - gap * (Leaderboard.tabs.length - 1)) / 2;
+    for (let i = 0; i < Leaderboard.tabs.length; i++) {
+      const tx = startX + i * (tabW + gap);
+      if (x >= tx && x <= tx + tabW && y >= tabY && y <= tabY + tabH) {
+        game.leaderboardTab = Leaderboard.tabs[i].key;
+        return;
+      }
+    }
+    if (x >= CONFIG.W / 2 - 70 && x <= CONFIG.W / 2 + 70 && y >= 850 && y <= 904) game.closeLeaderboard();
   } else if (game.state === "SHOP") {
     const tab = game.shopTab || 0;
     // 返回按钮（y 882-926）
@@ -3082,8 +3362,9 @@ window.addEventListener("keydown", e => {
     if (e.key === "3") { game.chooseUpgrade(2); return; }
   }
   if (e.key === " " || e.key === "Enter") {
-    if (game.state !== "PLAY") game.start();
+    if (game.state === "MENU" || game.state === "GAME_OVER") game.start();
   }
+  if (e.key === "Escape" && game.state === "LEADERBOARD") game.closeLeaderboard();
   if (e.key === "m" || e.key === "M") audio.toggle();
 });
 window.addEventListener("keyup", e => {
