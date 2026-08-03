@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-  <title>箭雨 v3.36</title>
+  <title>箭雨 v3.37</title>
   <style>
     html, body {
       margin: 0;
@@ -50,8 +50,8 @@
   </style>
 </head>
 <body>
-  <canvas id="game" width="540" height="960" aria-label="箭雨 v3.36 游戏画布"></canvas>
-  <div id="landscapeBlocker">请旋转设备为竖屏<br>箭雨 v3.36 仅支持竖屏飞行</div>
+  <canvas id="game" width="540" height="960" aria-label="箭雨 v3.37 游戏画布"></canvas>
+  <div id="landscapeBlocker">请旋转设备为竖屏<br>箭雨 v3.37 仅支持竖屏飞行</div>
 <script>
 "use strict";
 
@@ -621,17 +621,25 @@ class Arrow {
     } else if (this.ice && Math.random() < 0.45) {
       game.particles.get(this.x, this.y, Util.rand(-12, 12), Util.rand(-12, 12), 0.35, Util.pick(["#9fe8ff", "#5fc6ff", "#d6f5ff"]), Util.rand(2, 3.5));
     }
-    if (this.y < -80 || this.travel > this.range) {
-      // 弹射墙：撞到房间顶部边缘反弹（不消失）
-      if (this.bounce > 0 && this.y < -80 && this.vy < 0 && this.travel < this.range) {
-        this.bounce--;
-        this.y = -78;
-        this.vy = Math.abs(this.vy) * 0.9;
-        this.vx *= 0.95;
-        for (let i = 0; i < 6; i++) game.particles.get(this.x, 0, Util.rand(-20, 20), Util.rand(20, 60), 0.3, "#c77dff", Util.rand(2, 4));
-      } else {
-        this.active = false;
+    // 弹射墙：撞任意房间边缘反弹（顶部/底部/左/右四边都触发，弹射后重置飞行段继续飞）
+    // 修复：之前只弹顶部且反弹后vy向下→剩余bounce浪费；左右墙不弹→斜射直接消失；travel未重置→弹完马上消失
+    let bounced = false;
+    if (this.bounce > 0 && this.travel < this.range) {
+      if (this.y < -80 && this.vy < 0) {
+        this.bounce--; this.y = -78; this.vy = Math.abs(this.vy) * 0.9; this.vx *= 0.95; bounced = true;
+      } else if (this.y > CONFIG.H + 80 && this.vy > 0) {
+        this.bounce--; this.y = CONFIG.H + 78; this.vy = -Math.abs(this.vy) * 0.9; this.vx *= 0.95; bounced = true;
+      } else if (this.x < -40 && this.vx < 0) {
+        this.bounce--; this.x = -38; this.vx = Math.abs(this.vx) * 0.9; this.vy *= 0.95; bounced = true;
+      } else if (this.x > CONFIG.W + 40 && this.vx > 0) {
+        this.bounce--; this.x = CONFIG.W + 38; this.vx = -Math.abs(this.vx) * 0.9; this.vy *= 0.95; bounced = true;
       }
+    }
+    if (bounced) {
+      this.travel = 0; // 弹射开启新飞行段（否则弹完马上因射程耗尽消失）
+      for (let i = 0; i < 6; i++) game.particles.get(this.x, this.y, Util.rand(-20, 20), Util.rand(-20, 20), 0.3, "#c77dff", Util.rand(2, 4));
+    } else if (this.y < -80 || this.y > CONFIG.H + 80 || this.x < -40 || this.x > CONFIG.W + 40 || this.travel > this.range) {
+      this.active = false;
     }
     for (const e of game.enemies.active()) {
       if (!this.active || e.dead || this.hitIds.has(e.id)) continue;
@@ -1096,7 +1104,7 @@ class Enemy {
       const dy = game.player.y - this.y;
       const d = Math.max(1, Math.hypot(dx, dy));
       // 冲刺怪（小兵/精英swift）加速冲脸，其他缓慢逼近
-      // v3.36: 移速随章节缩放——第1章慢(×0.85)后期快(×1.1)，初始章节不再瞬追
+      // v3.37: 移速随章节缩放——第1章慢(×0.85)后期快(×1.1)，初始章节不再瞬追
       const ch = (game.chapter || 1);
       const chSpd = 0.85 + ch * 0.05;
       const chase = (this.type === "minion" ? (this.isElite ? 140 : 100)
@@ -1208,7 +1216,7 @@ class Enemy {
       } else if (this.eliteAffix === "splitter") {
         // 分裂怪：死亡前加速冲脸（为分裂制造压力）
         // ⚠️ 注意：chaseSpeed 是上面 if 块的块级 let 变量，这里引用会 ReferenceError
-        // 导致 rAF 主循环中断 = 游戏"卡住"（曾修过：v3.36 前的卡死根因）
+        // 导致 rAF 主循环中断 = 游戏"卡住"（曾修过：v3.37 前的卡死根因）
         const sdx = game.player.x - this.x, sdy = game.player.y - this.y;
         const sd = Math.max(1, Math.hypot(sdx, sdy));
         const spd = 160 * (0.85 + (game.chapter || 1) * 0.05) * slow; // 随章节缩放
@@ -1219,7 +1227,7 @@ class Enemy {
     if (this.isBoss) this.updateBoss(dt, game, slow);
     if (this.y > CONFIG.H + this.r + 80) this.active = false;
     if (!this.dead && game.player.canBeHit() && Util.circleHit(this, game.player)) {
-      // 碰撞伤害随章节成长（v3.36: 前期温和 13+ch×2，第1章15 可挨3下）
+      // 碰撞伤害随章节成长（v3.37: 前期温和 13+ch×2，第1章15 可挨3下）
       const hitDmg = 13 + (game.chapter || 1) * 2;
       game.player.hurt(hitDmg, game, Math.sign(game.player.x - this.x) * 90, 50);
     }
@@ -1250,7 +1258,7 @@ class Enemy {
     }
     const enrageMult = enrage ? 1.5 : 1;
     // 逼近速度：保持中距压制（太近会退，太远会追）——x/y 同时逼近
-    // v3.36: 狂暴追速 1.25→1.5，压迫感更强
+    // v3.37: 狂暴追速 1.25→1.5，压迫感更强
     const chaseSpeed = 70 * slow * (enrage ? 1.5 : 1);
     this.x += dx / d * chaseSpeed * dt;
     this.y += dy / d * chaseSpeed * 0.8 * dt;
@@ -1258,14 +1266,14 @@ class Enemy {
     this.rushT -= dt;
     if (this.rushT <= 0) {
       this.rushT = (enrage ? 1.5 : 3.2) + Util.rand(0, 1.2);
-      this.rushing = 1.5; // v3.36: 1.1→1.5s，冲锋距离拉长 36%
+      this.rushing = 1.5; // v3.37: 1.1→1.5s，冲锋距离拉长 36%
       this.rushDirX = dx / d;
       this.rushDirY = dy / d;
       audio.boss();
     }
     if (this.rushing > 0) {
       this.rushing -= dt;
-      const rushSpd = 300 * (enrage ? 1.3 : 1); // v3.36: 240→300
+      const rushSpd = 300 * (enrage ? 1.3 : 1); // v3.37: 240→300
       this.x += this.rushDirX * rushSpd * dt;
       this.y += this.rushDirY * rushSpd * dt;
     }
@@ -1278,7 +1286,7 @@ class Enemy {
     // 多样化攻击：随机攻击顺序（不固定轮换，玩家无法背板）+ 专属 Zone 技能 40% 概率
     this.shootT -= dt;
     if (this.shootT <= 0) {
-      // 狂暴时攻击更密：普通攻击间隔乘 0.5（v3.36: 0.65→0.5，狂暴攻速翻倍体感明显）
+      // 狂暴时攻击更密：普通攻击间隔乘 0.5（v3.37: 0.65→0.5，狂暴攻速翻倍体感明显）
       const cdMult = enrage ? 0.5 : 1;
       // 45% 概率放专属地面技能（zone），否则随机普通攻击
       if (Math.random() < 0.45) {
@@ -1438,7 +1446,7 @@ class Enemy {
       g.shadowBlur = 18;
       g.shadowColor = CONFIG.COLORS.red;
     } else if (this.isBoss && this.hp < this.maxHp * 0.35) {
-      // 狂暴持续特效：红色发光 + 呼吸脉冲（v3.36 新增，狂暴体感明显）
+      // 狂暴持续特效：红色发光 + 呼吸脉冲（v3.37 新增，狂暴体感明显）
       const pulse = 0.5 + 0.5 * Math.sin(performance.now() * 0.012);
       g.shadowBlur = 26 + 14 * pulse;
       g.shadowColor = "#ff3b30";
@@ -1640,7 +1648,7 @@ class Player {
     this.y = CONFIG.PLAYER_Y;
     this.r = CONFIG.PLAYER_R;
     this.hp = 50;
-    this.maxHp = 50; // v3.36: 40→50，前期容错（第1章碰撞15可挨3下）
+    this.maxHp = 50; // v3.37: 40→50，前期容错（第1章碰撞15可挨3下）
     this.moveSpeed = CONFIG.BASE_MOVE_SPEED;
     this.damage = CONFIG.BASE_ARROW_DAMAGE;
     this.fireRate = CONFIG.BASE_FIRE_RATE;
@@ -4435,7 +4443,7 @@ function drawMenu(g, state) {
   g.shadowBlur = 6 + 6 * pulse;
   g.fillStyle = "#d4c6af";
   g.font = "20px Microsoft YaHei, sans-serif";
-  g.fillText("v3.36 · 房间闯关 · 排行榜 · 每日挑战", CONFIG.W / 2, 292);
+  g.fillText("v3.37 · 房间闯关 · 排行榜 · 每日挑战", CONFIG.W / 2, 292);
   g.fillStyle = "#ffe59a";
   g.font = "bold 18px Microsoft YaHei, sans-serif";
   g.fillText(Leaderboard.champion || "暂无王者", CONFIG.W / 2, 326);
