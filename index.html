@@ -440,14 +440,14 @@ class AudioSystem {
     if (!AC) return;
     this.ctx = new AC();
     this.master = this.ctx.createGain();
-    this.master.gain.value = this.muted ? 0 : 0.16;
+    this.master.gain.value = this.muted ? 0 : 0.22;
     this.master.connect(this.ctx.destination);
   }
   toggle() {
     this.ensure();
     this.muted = !this.muted;
     localStorage.setItem("arrowStormMuted", this.muted ? "1" : "0");
-    if (this.master) this.master.gain.setTargetAtTime(this.muted ? 0 : 0.16, this.ctx.currentTime, 0.02);
+    if (this.master) this.master.gain.setTargetAtTime(this.muted ? 0 : 0.22, this.ctx.currentTime, 0.02);
   }
   tone(freq, dur, type = "sine", gain = 0.5, slide = 1) {
     this.ensure();
@@ -668,6 +668,31 @@ class Arrow {
   }
   render(g) {
     g.save();
+    // 法杖能量球：大光球渲染（区别于箭矢）
+    if (this.isStave) {
+      let cbody, cglow;
+      if (this.fire) { cbody = "#ff7b3d"; cglow = "#ff4f3d"; }
+      else if (this.ice) { cbody = "#5fc6ff"; cglow = "#3fa9ff"; }
+      else { cbody = "#c77dff"; cglow = "#a865ff"; }
+      g.shadowBlur = 24;
+      g.shadowColor = cglow;
+      g.fillStyle = cglow;
+      g.globalAlpha = 0.3;
+      g.beginPath();
+      g.arc(this.x, this.y, 14, 0, TAU);
+      g.fill();
+      g.globalAlpha = 1;
+      g.fillStyle = cbody;
+      g.beginPath();
+      g.arc(this.x, this.y, 8, 0, TAU);
+      g.fill();
+      g.fillStyle = "rgba(255,255,255,0.65)";
+      g.beginPath();
+      g.arc(this.x - 2, this.y - 2, 3, 0, TAU);
+      g.fill();
+      g.restore();
+      return;
+    }
     // 属性箭配色：普通紫 / 火橙红 / 冰蓝
     let body, glow, hot, trail;
     if (this.fire) { body = "#ff7b3d"; glow = "#ff4f3d"; hot = "#ffe3c2"; trail = "rgba(255,121,61,0.75)"; }
@@ -1616,8 +1641,10 @@ class Player {
     const legSwing = moving ? Math.sin(t * 10) * 4 : Math.sin(t * 3) * 1.5; // 走路/待机呼吸摆动
     const lean = Util.clamp((this.x - (this.lastX || this.x)) * 0.15, -6, 6); // 移动倾斜
     const skin = getWeaponSkin();
+    const stave = getWeaponStave();
     // 武器配色：皮肤色 + 元素色叠加
-    const bowColor = this.fire ? "#ff7b3d" : this.ice ? "#7ad0ff" : this.volt > 0 ? "#f7c948" : skin.color;
+    const bowColor = this.fire ? "#ff7b3d" : this.ice ? "#7ad0ff" : this.volt > 0 ? "#f7c948" : (isStaveMode() ? stave.color : skin.color);
+    const weaponColor = isStaveMode() ? stave.color : bowColor;
     g.translate(this.x + lean, this.y);
     // 披风（紫色，飘动）
     g.fillStyle = "rgba(124,58,180,0.85)";
@@ -1658,40 +1685,80 @@ class Player {
     g.beginPath();
     g.arc(0, -19, 8, Math.PI, 0);
     g.fill();
-    // 弓（皮肤样式：木弓弯弓 / 火焰弓红 + 火星 / 冰霜弓蓝 + 冰晶 / 雷神弓金 + 电弧）
-    g.strokeStyle = bowColor;
-    g.lineWidth = 3.5;
-    g.shadowBlur = 12;
-    g.shadowColor = bowColor;
-    g.beginPath();
-    g.arc(16, -4, 13, -Math.PI / 2.4, Math.PI / 2.4);
-    g.stroke();
-    g.shadowBlur = 0;
-    // 弓弦
-    g.strokeStyle = "rgba(255,255,255,0.5)";
-    g.lineWidth = 1;
-    g.beginPath();
-    g.moveTo(16 + Math.cos(-Math.PI / 2.4) * 13, -4 + Math.sin(-Math.PI / 2.4) * 13);
-    g.lineTo(16 + Math.cos(Math.PI / 2.4) * 13, -4 + Math.sin(Math.PI / 2.4) * 13);
-    g.stroke();
-    // 皮肤特效：火焰弓火星 / 冰霜弓冰晶 / 雷神弓电弧
-    if (this.fire || skin.id === 1) {
-      g.fillStyle = "rgba(255,140,60,0.9)";
+    if (isStaveMode()) {
+      // 法杖（木/火/冰/雷：长杖 + 顶部宝石 + 元素光晕）
+      g.strokeStyle = weaponColor;
+      g.lineWidth = 3;
       g.beginPath();
-      g.arc(20 + Math.sin(t * 9) * 3, -10 + Math.cos(t * 7) * 3, 2, 0, TAU);
-      g.fill();
-    } else if (this.ice || skin.id === 2) {
-      g.fillStyle = "rgba(150,220,255,0.9)";
-      g.beginPath();
-      g.arc(20 + Math.sin(t * 8) * 3, -9 + Math.cos(t * 6) * 3, 1.8, 0, TAU);
-      g.fill();
-    } else if (skin.id === 3) {
-      g.strokeStyle = "rgba(247,201,72,0.8)";
-      g.lineWidth = 1.5;
-      g.beginPath();
-      g.moveTo(26, -10 + Math.sin(t * 12) * 4);
-      g.lineTo(31, -6 + Math.cos(t * 10) * 4);
+      g.moveTo(22, 10);
+      g.lineTo(28, -24);
       g.stroke();
+      g.shadowBlur = 14;
+      g.shadowColor = weaponColor;
+      g.fillStyle = this.fire ? "#ff7b3d" : this.ice ? "#7ad0ff" : this.volt > 0 ? "#f7c948" : "#c77dff";
+      g.beginPath();
+      g.arc(28, -28, 5, 0, TAU);
+      g.fill();
+      g.fillStyle = "rgba(255,255,255,0.7)";
+      g.beginPath();
+      g.arc(27, -29, 1.8, 0, TAU);
+      g.fill();
+      g.shadowBlur = 0;
+      // 法杖元素特效：火=火星 / 冰=冰晶 / 雷=电弧
+      if (this.fire || (isStaveMode() && stave.bonus.elem === "fire")) {
+        g.fillStyle = "rgba(255,140,60,0.9)";
+        g.beginPath();
+        g.arc(28 + Math.sin(t * 9) * 3, -30 + Math.cos(t * 7) * 3, 2, 0, TAU);
+        g.fill();
+      } else if (this.ice || (isStaveMode() && stave.bonus.elem === "ice")) {
+        g.fillStyle = "rgba(150,220,255,0.9)";
+        g.beginPath();
+        g.arc(28 + Math.sin(t * 8) * 3, -29 + Math.cos(t * 6) * 3, 1.8, 0, TAU);
+        g.fill();
+      } else if (this.volt > 0 || (isStaveMode() && stave.bonus.elem === "volt")) {
+        g.strokeStyle = "rgba(247,201,72,0.8)";
+        g.lineWidth = 1.5;
+        g.beginPath();
+        g.moveTo(28, -34 + Math.sin(t * 12) * 4);
+        g.lineTo(33, -30 + Math.cos(t * 10) * 4);
+        g.stroke();
+      }
+    } else {
+      // 弓（皮肤样式：木弓弯弓 / 火焰弓红 + 火星 / 冰霜弓蓝 + 冰晶 / 雷神弓金 + 电弧）
+      g.strokeStyle = bowColor;
+      g.lineWidth = 3.5;
+      g.shadowBlur = 12;
+      g.shadowColor = bowColor;
+      g.beginPath();
+      g.arc(16, -4, 13, -Math.PI / 2.4, Math.PI / 2.4);
+      g.stroke();
+      g.shadowBlur = 0;
+      // 弓弦
+      g.strokeStyle = "rgba(255,255,255,0.5)";
+      g.lineWidth = 1;
+      g.beginPath();
+      g.moveTo(16 + Math.cos(-Math.PI / 2.4) * 13, -4 + Math.sin(-Math.PI / 2.4) * 13);
+      g.lineTo(16 + Math.cos(Math.PI / 2.4) * 13, -4 + Math.sin(Math.PI / 2.4) * 13);
+      g.stroke();
+      // 皮肤特效：火焰弓火星 / 冰霜弓冰晶 / 雷神弓电弧
+      if (this.fire || skin.id === 1) {
+        g.fillStyle = "rgba(255,140,60,0.9)";
+        g.beginPath();
+        g.arc(20 + Math.sin(t * 9) * 3, -10 + Math.cos(t * 7) * 3, 2, 0, TAU);
+        g.fill();
+      } else if (this.ice || skin.id === 2) {
+        g.fillStyle = "rgba(150,220,255,0.9)";
+        g.beginPath();
+        g.arc(20 + Math.sin(t * 8) * 3, -9 + Math.cos(t * 6) * 3, 1.8, 0, TAU);
+        g.fill();
+      } else if (skin.id === 3) {
+        g.strokeStyle = "rgba(247,201,72,0.8)";
+        g.lineWidth = 1.5;
+        g.beginPath();
+        g.moveTo(26, -10 + Math.sin(t * 12) * 4);
+        g.lineTo(31, -6 + Math.cos(t * 10) * 4);
+        g.stroke();
+      }
     }
     g.restore();
     for (const sword of this.swords) sword.render(g);
@@ -1848,6 +1915,7 @@ const DEFAULTS = {
   equip: { bow: 0, charm: 0, sigil: 0 },   // 0-3 级
   talents: { dmg: 0, hp: 0, arrow: 0 },    // 0-3 级
   weaponSkin: 0,                           // 0=木弓 1=火焰弓 2=冰霜弓 3=雷神弓
+  weaponCat: 0,                            // 0=弓 1=法杖（双武器路线）
   chapter: 1,
   bestWave: 0,
   // 英雄等级（局外成长核心）：每局经验 → 升级 → 天赋点
@@ -1892,7 +1960,16 @@ const WEAPON_SKINS = [
   { id: 2, name: "冰霜弓", icon: "❄", price: 150, color: "#5fc6ff", desc: "减速效果 +40%，射速 +6%", bonus: { slow: 1.4, rate: 1.06 } },
   { id: 3, name: "雷神弓", icon: "⚡", price: 200, color: "#f7c948", desc: "暴击率 +12%，箭速 +15%", bonus: { crit: 0.12, arrowSpeed: 1.15 } }
 ];
+// 法杖：第二武器路线（慢速高伤 + 自带元素，弓箭传说2 式双流派）
+const WEAPON_STAVES = [
+  { id: 0, name: "木法杖", icon: "🪄", price: 0, color: "#8b6a4a", desc: "初始法杖：慢速高伤，无元素", bonus: { dmg: 1.5, rate: 0.62, elem: null } },
+  { id: 1, name: "火焰法杖", icon: "🔥", price: 160, color: "#e54d3c", desc: "自带灼烧，元素伤害 +30%", bonus: { dmg: 1.55, rate: 0.62, elem: "fire", elemBoost: 1.3 } },
+  { id: 2, name: "冰霜法杖", icon: "❄", price: 190, color: "#5fc6ff", desc: "自带减速，元素伤害 +30%", bonus: { dmg: 1.55, rate: 0.62, elem: "ice", elemBoost: 1.3 } },
+  { id: 3, name: "雷电法杖", icon: "⚡", price: 240, color: "#f7c948", desc: "自带弹射，暴击率 +15%", bonus: { dmg: 1.6, rate: 0.62, elem: "volt", crit: 0.15 } }
+];
 function getWeaponSkin() { return WEAPON_SKINS[SaveSystem.data.weaponSkin] || WEAPON_SKINS[0]; }
+function getWeaponStave() { return WEAPON_STAVES[SaveSystem.data.weaponSkin] || WEAPON_STAVES[0]; }
+function isStaveMode() { return SaveSystem.data.weaponCat === 1; }
 
 // ── 图鉴系统（收集进度）──
 const CODEX_MONSTERS = [
@@ -1923,6 +2000,18 @@ function codexProgress(cat) {
   return { got: Math.min(got, total), total };
 }
 function applyWeaponSkin(player) {
+  if (isStaveMode()) {
+    // 法杖：慢速高伤 + 自带元素
+    const st = getWeaponStave();
+    player.damage *= st.bonus.dmg || 1;
+    player.fireRate *= st.bonus.rate || 1;
+    if (st.bonus.elem === "fire") player.fire = true;
+    if (st.bonus.elem === "ice") player.ice = true;
+    if (st.bonus.elem === "volt") player.volt = Math.max(player.volt || 0, 1);
+    if (st.bonus.elemBoost) player.elemBoost = Math.max(player.elemBoost || 1, st.bonus.elemBoost);
+    if (st.bonus.crit) player.crit = Math.min(0.6, player.crit + st.bonus.crit);
+    return;
+  }
   const skin = getWeaponSkin();
   if (skin.bonus.dmg) player.damage *= skin.bonus.dmg;
   if (skin.bonus.rate) player.fireRate *= skin.bonus.rate;
@@ -1945,6 +2034,7 @@ const SaveSystem = {
         equip: { ...DEFAULTS.equip, ...(parsed.equip || {}) },
         talents: { ...DEFAULTS.talents, ...(parsed.talents || {}) },
         weaponSkin: parsed.weaponSkin || 0,
+        weaponCat: parsed.weaponCat || 0,
         chapter: parsed.chapter || 1,
         bestWave: parsed.bestWave || 0,
         heroLevel: parsed.heroLevel || 1,
@@ -2353,9 +2443,22 @@ class Game {
       else if (slot === "hp") { const add = 15; this.player.maxHp = Math.min(240, this.player.maxHp + add); this.player.hp = Math.min(this.player.maxHp, this.player.hp + add); }
       else if (slot === "arrow") this.player.arrowCount = Math.min(3, this.player.arrowCount + 1);
     } else if (kind === "weapon") {
+      // 法杖路线：切换武器类型（弓→法杖），weaponSkin 0-3 共享
+      if (slot === "cat") {
+        const newCat = 1 - s.weaponCat;
+        s.weaponCat = newCat;
+        SaveSystem.save();
+        // 切换后重新应用当前武器加成到玩家
+        if (this.player) {
+          // 简单做法：记录切换，下一局生效（当前局保留原武器属性，避免数值混乱）
+          this.flashMessage(newCat === 1 ? "已切换法杖路线（下一局生效）" : "已切换弓箭路线（下一局生效）");
+        }
+        codexUnlock("skins", "cat_" + newCat);
+        return true;
+      }
       if (s.weaponSkin >= slot) { s.weaponSkin = slot; SaveSystem.save(); }
-      else if (s.gold >= WEAPON_SKINS[slot].price) {
-        s.gold -= WEAPON_SKINS[slot].price;
+      else if (s.gold >= (isStaveMode() ? WEAPON_STAVES[slot].price : WEAPON_SKINS[slot].price)) {
+        s.gold -= (isStaveMode() ? WEAPON_STAVES[slot].price : WEAPON_SKINS[slot].price);
         s.weaponSkin = slot;
         SaveSystem.save();
       } else return false;
@@ -2532,7 +2635,18 @@ class Game {
       const t = n === 1 ? 0 : (i / (n - 1) - 0.5) * spread;
       // 多箭伤害递减：1/0.85/0.7（防止多重箭无脑碾压）
       const dmgMul = n === 1 ? 1 : 1 - i * 0.15;
-      const a = this.arrows.get(this.player.x, this.player.y - 36, targetAngle + t, this.player.damage * dmgMul * berserkMult, this.player.range, this.player.pierce, this.player.crit, this.player.fire, this.player.ice);
+      // 法杖模式：能量球（高伤自带元素，穿透+1，弹速略慢）
+      const isStave = isStaveMode();
+      const st = isStave ? getWeaponStave() : null;
+      const baseDmg = this.player.damage * dmgMul * berserkMult;
+      const a = isStave
+        ? this.arrows.get(this.player.x, this.player.y - 36, targetAngle + t, baseDmg, this.player.range, this.player.pierce + 1, this.player.crit, this.player.fire || st.bonus.elem === "fire", this.player.ice || st.bonus.elem === "ice")
+        : this.arrows.get(this.player.x, this.player.y - 36, targetAngle + t, baseDmg, this.player.range, this.player.pierce, this.player.crit, this.player.fire, this.player.ice);
+      a.isStave = isStave;
+      if (isStave) {
+        a.vx *= 0.85; a.vy *= 0.85; // 能量球略慢
+        if (st.bonus.elem === "volt") a.volt = Math.max(a.volt || 0, this.player.volt || 1);
+      }
       a.split = this.player.split;
       a.volt = this.player.volt;
       a.frostfire = this.player.frostfire;
@@ -3442,23 +3556,36 @@ function drawInRunShop(g, state) {
       g.fillText(tmaxed ? "已满级" : `${tprice}💰`, 449, y + 59);
       y += 80;
     });
-    // 武器皮肤（一行）
+    // 武器路线（弓/法杖切换 + 当前路线 4 款武器）
     g.fillStyle = "#9aa5b4";
     g.font = "11px Microsoft YaHei, sans-serif";
-    g.fillText("武器皮肤：", 48, y + 18);
-    WEAPON_SKINS.forEach((wsk, i) => {
+    g.fillText("武器路线：", 48, y + 18);
+    // 切换按钮：弓 / 法杖
+    [["弓", 0], ["法杖", 1]].forEach(([label, cat], i) => {
+      const bx = 120 + i * 92;
+      const active = s.weaponCat === cat;
+      g.fillStyle = active ? "rgba(247,201,72,0.3)" : "rgba(255,255,255,0.1)";
+      roundRect(g, bx, y + 4, 82, 24, 6); g.fill();
+      if (active) { g.strokeStyle = "#f7c948"; g.lineWidth = 1.5; roundRect(g, bx, y + 4, 82, 24, 6); g.stroke(); }
+      g.fillStyle = active ? "#f7c948" : "#9aa5b4";
+      g.font = "bold 12px Microsoft YaHei, sans-serif";
+      g.fillText(`${label} ${active ? "✓" : ""}`, bx + 41, y + 21);
+    });
+    // 当前路线武器（4 款）
+    const list = s.weaponCat === 1 ? WEAPON_STAVES : WEAPON_SKINS;
+    list.forEach((w, i) => {
       const wx = 120 + i * 92;
       const current = s.weaponSkin === i;
       const owned = s.weaponSkin >= i;
       g.fillStyle = current ? "#2a2418" : "#1a2029";
-      roundRect(g, wx, y + 4, 82, 54, 8); g.fill();
-      if (current) { g.strokeStyle = "#f7c948"; g.lineWidth = 2; roundRect(g, wx, y + 4, 82, 54, 8); g.stroke(); }
-      g.fillStyle = wsk.color;
-      g.font = "bold 18px Microsoft YaHei, sans-serif";
-      g.fillText(wsk.icon, wx + 41, y + 24);
+      roundRect(g, wx, y + 34, 82, 40, 8); g.fill();
+      if (current) { g.strokeStyle = "#f7c948"; g.lineWidth = 2; roundRect(g, wx, y + 34, 82, 40, 8); g.stroke(); }
+      g.fillStyle = w.color;
+      g.font = "bold 14px Microsoft YaHei, sans-serif";
+      g.fillText(w.icon, wx + 41, y + 54);
       g.fillStyle = current ? "#f7c948" : "#e8eef6";
-      g.font = "11px Microsoft YaHei, sans-serif";
-      g.fillText(current ? "使用中" : owned ? "装备" : `${wsk.price}💰`, wx + 41, y + 46);
+      g.font = "10px Microsoft YaHei, sans-serif";
+      g.fillText(current ? "使用中" : owned ? "装备" : `${w.price}💰`, wx + 41, y + 68);
     });
   }
   g.fillStyle = "#b9c2d0";
@@ -3947,6 +4074,7 @@ function drawCodex(g, state) {
 
 function drawUI(g, state) {
   if (state.state === "PLAY") drawHud(g, state);
+  drawMute(g); // 音效开关：所有页面可见
   if (state.messageT > 0) {
     g.save();
     g.globalAlpha = Math.min(1, state.messageT);
@@ -4055,7 +4183,6 @@ function drawHud(g, state) {
   g.fillStyle = "#d8b26a";
   g.fillText(`${state.runGold || 0}💰`, CONFIG.W - 53, CONFIG.H - 26);
   g.textAlign = "right";
-  drawMute(g, state);
   if (state.boss && state.boss.active) {
     const p = Util.clamp(state.boss.hp / state.boss.maxHp, 0, 1);
     g.fillStyle = "rgba(0,0,0,0.55)";
@@ -4073,13 +4200,17 @@ function drawHud(g, state) {
 }
 
 function drawMute(g) {
+  // 音效开关按钮：全局固定右上角（避开左上角血条 HUD）
   g.save();
-  g.fillStyle = "rgba(13,20,14,0.62)";
-  roundRect(g, 20, 82, 42, 32, 8); g.fill();
+  g.fillStyle = "rgba(13,20,14,0.65)";
+  roundRect(g, CONFIG.W - 86, 16, 40, 30, 8); g.fill();
+  g.strokeStyle = audio.muted ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.45)";
+  g.lineWidth = 2;
+  roundRect(g, CONFIG.W - 86, 16, 40, 30, 8); g.stroke();
   g.fillStyle = CONFIG.COLORS.ui;
-  g.font = "18px Arial";
+  g.font = "bold 16px Arial";
   g.textAlign = "center";
-  g.fillText(audio.muted ? "×" : "♪", 41, 104);
+  g.fillText(audio.muted ? "🔇" : "🔊", CONFIG.W - 66, 38);
   g.restore();
 }
 
@@ -4162,7 +4293,7 @@ function drawMenu(g, state) {
   lines.forEach((line, i) => g.fillText(line, CONFIG.W / 2, 786 + i * 28));
   g.fillStyle = "#a9977d";
   g.font = "14px Microsoft YaHei, sans-serif";
-  g.fillText(`音效：${audio.muted ? "关" : "开"}  点击左上角音符切换`, CONFIG.W / 2, 878);
+  g.fillText(`音效：${audio.muted ? "关" : "开"}  点击右上角 🔊 切换`, CONFIG.W / 2, 878);
   g.restore();
 }
 
@@ -4362,7 +4493,10 @@ function activateAt(x, y) {
       game.closeStatsPanel();
       return;
     }
+    return;
   }
+  // 音效开关按钮：全局右上角（所有状态最先判断）
+  if (x >= CONFIG.W - 86 && x <= CONFIG.W - 46 && y >= 16 && y <= 46) { audio.toggle(); return; }
   if (game.state === "PLAY" && game.inRunShop) {
     const shop = game.inRunShop;
     const tab = shop.tab || 0;
@@ -4413,11 +4547,21 @@ function activateAt(x, y) {
           return;
         }
       }
-      // 武器皮肤行（y 486-540 区域，x 120+92i）
+      // 武器路线区（y 486 起：切换按钮 y+4~28，武器卡 y+34~74）
       const skinY = 246 + 3 * 80;
-      for (let i = 0; i < WEAPON_SKINS.length; i++) {
+      // 切换按钮：弓/法杖
+      [[0, "弓"], [1, "法杖"]].forEach(([cat], i) => {
+        const bx = 120 + i * 92;
+        if (x >= bx && x <= bx + 82 && y >= skinY + 4 && y <= skinY + 28) {
+          game.buyMetaFromInRun("weapon", "cat");
+          return;
+        }
+      });
+      // 当前路线武器（4 款）
+      const wList = SaveSystem.data.weaponCat === 1 ? WEAPON_STAVES : WEAPON_SKINS;
+      for (let i = 0; i < wList.length; i++) {
         const wx = 120 + i * 92;
-        if (x >= wx && x <= wx + 82 && y >= skinY + 4 && y <= skinY + 58) {
+        if (x >= wx && x <= wx + 82 && y >= skinY + 34 && y <= skinY + 74) {
           game.buyMetaFromInRun("weapon", i);
           return;
         }
@@ -4560,6 +4704,7 @@ window.addEventListener("keyup", e => {
 canvas.addEventListener("pointerdown", e => {
   // AI 演示模式：禁用一切指针输入
   if (DEMO) return;
+  audio.ensure(); // 用户手势：立即初始化音频（浏览器自动播放策略要求）
   const p = canvasPoint(e);
   activateAt(p.x, p.y);
   game.input.touching = true;
