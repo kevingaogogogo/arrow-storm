@@ -208,13 +208,9 @@ const Leaderboard = {
   async load(options = {}) {
     const silent = !!options.silent;
     if (!silent) this.status = "loading";
-    // 尝试顺序：GitHub 镜像（国内稳定）→ jsonblob（最新）→ localStorage 缓存（离线兜底）
+    // 尝试顺序：jsonblob（实时权威）→ GitHub 镜像（jsonblob 挂了时的降级快照）→ localStorage 缓存（离线兜底）
+    // 注意：mirror 是部署时静态快照，若优先会掩盖 jsonblob 的新数据
     const attempts = [
-      async () => {
-        const res = await fetch(LEADERBOARD_MIRROR, { cache: "no-store" });
-        if (!res.ok) throw new Error("mirror failed");
-        return this.normalize(await res.json());
-      },
       async () => {
         let id = this.id;
         let res = await this.request("GET", id);
@@ -223,6 +219,11 @@ const Leaderboard = {
           res = await this.request("GET", id);
         }
         if (!res.ok) throw new Error("jsonblob failed");
+        return this.normalize(await res.json());
+      },
+      async () => {
+        const res = await fetch(LEADERBOARD_MIRROR, { cache: "no-store" });
+        if (!res.ok) throw new Error("mirror failed");
         return this.normalize(await res.json());
       },
       async () => {
@@ -278,7 +279,12 @@ const Leaderboard = {
       const now = Date.now();
       if (now - last < 60000) return;
       localStorage.setItem(guardKey, String(now));
-      const board = await this.load({ silent: true }).catch(() => ({ version: 1, players: [] }));
+      // 基础数据必须从 jsonblob 读（唯一权威写入源）——不能走 mirror（静态镜像可能滞后，会覆盖丢数据）
+      let board = { version: 1, players: [] };
+      try {
+        const res = await this.request("GET", this.id);
+        if (res.ok) board = this.normalize(await res.json());
+      } catch (_) {}
       const next = this.normalize(board);
       next.players = this.mergeRecord(next.players, Object.assign({}, record, { name }));
       let res = await this.request("PUT", this.id, next);
