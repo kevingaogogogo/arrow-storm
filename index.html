@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-  <title>箭雨 v3.28</title>
+  <title>箭雨 v3.29</title>
   <style>
     html, body {
       margin: 0;
@@ -50,8 +50,8 @@
   </style>
 </head>
 <body>
-  <canvas id="game" width="540" height="960" aria-label="箭雨 v3.28 游戏画布"></canvas>
-  <div id="landscapeBlocker">请旋转设备为竖屏<br>箭雨 v3.28 仅支持竖屏飞行</div>
+  <canvas id="game" width="540" height="960" aria-label="箭雨 v3.29 游戏画布"></canvas>
+  <div id="landscapeBlocker">请旋转设备为竖屏<br>箭雨 v3.29 仅支持竖屏飞行</div>
 <script>
 "use strict";
 
@@ -62,7 +62,7 @@ const CONFIG = {
   PLAYER_Y: 960 * 0.82,
   PLAYER_R: 18,
   BASE_FLY_SPEED: 140,
-  BASE_MOVE_SPEED: 320,
+  BASE_MOVE_SPEED: 300,
   BASE_FIRE_RATE: 2,
   BASE_ARROW_SPEED: 720,
   BASE_ARROW_DAMAGE: 14,
@@ -1093,10 +1093,11 @@ class Enemy {
       const dy = game.player.y - this.y;
       const d = Math.max(1, Math.hypot(dx, dy));
       // 冲刺怪（小兵/精英swift）加速冲脸，其他缓慢逼近
-      const chase = this.type === "minion" ? (this.isElite ? 165 : 120)
-        : this.type === "tank" ? 48
-        : this.type === "flyer" ? 100 : 60;
-      let chaseSpeed = (this.isElite && this.eliteAffix === "swift" ? 190 : chase) * slow;
+      // v3.29: 前期移速下调（小兵 120→100，swift 190→170），新手不会被瞬追
+      const chase = this.type === "minion" ? (this.isElite ? 140 : 100)
+        : this.type === "tank" ? 42
+        : this.type === "flyer" ? 88 : 60;
+      let chaseSpeed = (this.isElite && this.eliteAffix === "swift" ? 170 : chase) * slow;
       // 攻击欲望：小兵受伤后狂暴（被打加速逼近，越打越急）
       if (this.type === "minion" && this.hp < this.maxHp * 0.5 && !this.isElite) {
         chaseSpeed *= 1.35;
@@ -1153,7 +1154,7 @@ class Enemy {
         const leadY = game.player.y + game.player.vy * 0.3;
         const ldx = lead - this.x, ldy = leadY - this.y;
         const llen = Math.max(1, Math.hypot(ldx, ldy));
-        const bulletDmg = 10 + ch * 1.5;
+        const bulletDmg = 8 + ch * 1.5;
         const bvx = ldx / llen * (180 + ch * 6);
         const bvy = ldy / llen * (180 + ch * 6);
         game.bullets.get(this.x, this.y + this.r * 0.4, bvx, bvy, 7, bulletDmg);
@@ -1202,7 +1203,7 @@ class Enemy {
       } else if (this.eliteAffix === "splitter") {
         // 分裂怪：死亡前加速冲脸（为分裂制造压力）
         // ⚠️ 注意：chaseSpeed 是上面 if 块的块级 let 变量，这里引用会 ReferenceError
-        // 导致 rAF 主循环中断 = 游戏"卡住"（曾修过：v3.28 前的卡死根因）
+        // 导致 rAF 主循环中断 = 游戏"卡住"（曾修过：v3.29 前的卡死根因）
         const sdx = game.player.x - this.x, sdy = game.player.y - this.y;
         const sd = Math.max(1, Math.hypot(sdx, sdy));
         const spd = 160 * slow;
@@ -1213,8 +1214,8 @@ class Enemy {
     if (this.isBoss) this.updateBoss(dt, game, slow);
     if (this.y > CONFIG.H + this.r + 80) this.active = false;
     if (!this.dead && game.player.canBeHit() && Util.circleHit(this, game.player)) {
-      // 碰撞伤害随章节成长（第三章起必须有威胁）
-      const hitDmg = 15 + (game.chapter || 1) * 3;
+      // 碰撞伤害随章节成长（v3.29: 前期温和 13+ch×2，第1章15 可挨3下）
+      const hitDmg = 13 + (game.chapter || 1) * 2;
       game.player.hurt(hitDmg, game, Math.sign(game.player.x - this.x) * 90, 50);
     }
   }
@@ -1619,8 +1620,8 @@ class Player {
     this.x = CONFIG.W / 2;
     this.y = CONFIG.PLAYER_Y;
     this.r = CONFIG.PLAYER_R;
-    this.hp = 40;
-    this.maxHp = 40;
+    this.hp = 50;
+    this.maxHp = 50; // v3.29: 40→50，前期容错（第1章碰撞15可挨3下）
     this.moveSpeed = CONFIG.BASE_MOVE_SPEED;
     this.damage = CONFIG.BASE_ARROW_DAMAGE;
     this.fireRate = CONFIG.BASE_FIRE_RATE;
@@ -2284,6 +2285,7 @@ class Game {
     this.particles = new Pool(Particle);
     this.input = { left: 0, right: 0, up: 0, down: 0, touching: false, touchX: CONFIG.W / 2, touchY: CONFIG.PLAYER_Y, hover: false, hoverX: CONFIG.W / 2, hoverY: CONFIG.PLAYER_Y };
     this.state = "MENU";
+    this.paused = false; // 暂停菜单（完全冻结）
     this.highScore = Number(localStorage.getItem("arrowStormHighScore") || "0");
     this.decor = [];
     this.leaves = [];
@@ -2421,6 +2423,20 @@ class Game {
   getFlySpeed() {
     return 0;
   }
+  // 暂停菜单"回到主页"：结算局内金币 + 英雄经验，回 MENU（不丢成长）
+  toMenu() {
+    if (this.state === "PLAY" && this.player.hp > 0) {
+      this.bankRunGold();
+      gainHeroExp(this, this.kills || 0, this.chapter || 1, this.roomIndex || 0);
+    }
+    this.paused = false;
+    this.inRunShop = null;
+    this.statsPanel = false;
+    this.state = "MENU";
+    SaveSystem.data.chapter = Math.max(SaveSystem.data.chapter || 1, this.chapter || 1);
+    SaveSystem.save();
+    audio.upgrade();
+  }
   bankRunGold() {
     if (this.settlementBanked) return;
     this.settlementBanked = true;
@@ -2436,6 +2452,8 @@ class Game {
       this.slowMo -= dt;
       dt *= 0.35;
     }
+    // 暂停：完全冻结（玩家/怪/弹幕/计时全部停，画面保留）
+    if (this.paused) return;
     if (this.state !== "PLAY") {
       this.updateBackdrop(dt);
       for (const p of this.particles.active()) p.update(dt);
@@ -4204,6 +4222,7 @@ function drawCodex(g, state) {
 function drawUI(g, state) {
   if (state.state === "PLAY") drawHud(g, state);
   drawMute(g); // 音效开关：所有页面可见
+  drawPause(g, state); // 暂停键 + 暂停菜单
   // 顶部提示消息（商店/面板打开时隐藏，避免遮挡内容）
   if (state.messageT > 0 && !state.inRunShop && !state.statsPanel) {
     g.save();
@@ -4344,6 +4363,43 @@ function drawMute(g) {
   g.restore();
 }
 
+// 暂停键（左上角，战斗中显示）+ 暂停菜单（继续/回到主页/音效）
+function drawPause(g, state) {
+  if (state.state === "PLAY") {
+    // ⏸ 按钮：左上角（避开右上角 🔊📊）
+    g.save();
+    g.fillStyle = "rgba(13,20,14,0.65)";
+    roundRect(g, 16, 16, 40, 30, 8); g.fill();
+    g.strokeStyle = "rgba(255,255,255,0.45)";
+    g.lineWidth = 2;
+    roundRect(g, 16, 16, 40, 30, 8); g.stroke();
+    g.fillStyle = CONFIG.COLORS.ui;
+    g.font = "bold 15px Arial";
+    g.textAlign = "center";
+    g.fillText(state.paused ? "▶" : "⏸", 36, 38);
+    g.restore();
+  }
+  if (!state.paused) return;
+  // 暂停菜单：半透明遮罩 + 三个按钮
+  g.save();
+  g.fillStyle = "rgba(7,12,8,0.72)";
+  g.fillRect(0, 0, CONFIG.W, CONFIG.H);
+  g.textAlign = "center";
+  g.fillStyle = "#f8e9ff";
+  g.font = "bold 34px Microsoft YaHei, sans-serif";
+  g.fillText("已暂停", CONFIG.W / 2, 300);
+  g.fillStyle = "#9aa5b4";
+  g.font = "15px Microsoft YaHei, sans-serif";
+  g.fillText(`第 ${state.chapter} 章 · 房间 ${state.roomIndex + 1}/6`, CONFIG.W / 2, 340);
+  // 继续
+  drawButton(g, CONFIG.W / 2 - 90, 400, 180, 54, "继续游戏");
+  // 回到主页
+  drawButton(g, CONFIG.W / 2 - 90, 474, 180, 54, "回到主页");
+  // 音效
+  drawButton(g, CONFIG.W / 2 - 90, 548, 180, 54, audio.muted ? "音效：关 🔇" : "音效：开 🔊");
+  g.restore();
+}
+
 function drawMenu(g, state) {
   g.save();
   g.fillStyle = "rgba(7,12,8,0.62)";
@@ -4364,7 +4420,7 @@ function drawMenu(g, state) {
   g.shadowBlur = 6 + 6 * pulse;
   g.fillStyle = "#d4c6af";
   g.font = "20px Microsoft YaHei, sans-serif";
-  g.fillText("v3.28 · 房间闯关 · 排行榜 · 每日挑战", CONFIG.W / 2, 292);
+  g.fillText("v3.29 · 房间闯关 · 排行榜 · 每日挑战", CONFIG.W / 2, 292);
   g.fillStyle = "#ffe59a";
   g.font = "bold 18px Microsoft YaHei, sans-serif";
   g.fillText(Leaderboard.champion || "暂无王者", CONFIG.W / 2, 326);
@@ -4633,6 +4689,16 @@ function activateAt(x, y) {
   }
   // 音效开关按钮：全局右上角（所有状态最先判断）
   if (x >= CONFIG.W - 86 && x <= CONFIG.W - 46 && y >= 16 && y <= 46) { audio.toggle(); return; }
+  // 暂停系统：战斗中的 ⏸ 键 + 暂停菜单按钮（最优先，先于一切战斗交互）
+  if (game.state === "PLAY") {
+    if (!game.paused && x >= 16 && x <= 56 && y >= 16 && y <= 46) { game.paused = true; return; }
+    if (game.paused) {
+      if (x >= CONFIG.W / 2 - 90 && x <= CONFIG.W / 2 + 90 && y >= 400 && y <= 454) { game.paused = false; return; }
+      if (x >= CONFIG.W / 2 - 90 && x <= CONFIG.W / 2 + 90 && y >= 474 && y <= 528) { game.toMenu(); return; }
+      if (x >= CONFIG.W / 2 - 90 && x <= CONFIG.W / 2 + 90 && y >= 548 && y <= 602) { audio.toggle(); return; }
+      return;
+    }
+  }
   if (game.state === "PLAY" && game.inRunShop) {
     const shop = game.inRunShop;
     // 关闭按钮（y 578-608，所有模式）
