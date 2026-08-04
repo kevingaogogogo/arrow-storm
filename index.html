@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-  <title>箭雨 v3.39</title>
+  <title>箭雨 v3.40</title>
   <style>
     html, body {
       margin: 0;
@@ -50,8 +50,8 @@
   </style>
 </head>
 <body>
-  <canvas id="game" width="540" height="960" aria-label="箭雨 v3.39 游戏画布"></canvas>
-  <div id="landscapeBlocker">请旋转设备为竖屏<br>箭雨 v3.39 仅支持竖屏飞行</div>
+  <canvas id="game" width="540" height="960" aria-label="箭雨 v3.40 游戏画布"></canvas>
+  <div id="landscapeBlocker">请旋转设备为竖屏<br>箭雨 v3.40 仅支持竖屏飞行</div>
 <script>
 "use strict";
 
@@ -415,6 +415,7 @@ function checkThemeSwitch(game) {
     themeTrans = 1;
     game.flashMessage(`第 ${game.chapter} 章 · ${THEMES[want].name}`);
     audio.upgrade();
+    audio.bgmStart(want); // 章节切换背景音乐
     rebuildThemeDecor(game);
   }
 }
@@ -452,6 +453,9 @@ class AudioSystem {
     this.ctx = null;
     this.master = null;
     this.muted = localStorage.getItem("arrowStormMuted") === "1";
+    this.bgmTimer = null;
+    this.bgmStep = 0;
+    this.bgmTheme = -1;
   }
   ensure() {
     if (this.ctx) return;
@@ -461,6 +465,8 @@ class AudioSystem {
     this.master = this.ctx.createGain();
     this.master.gain.value = this.muted ? 0 : 0.22;
     this.master.connect(this.ctx.destination);
+    // 若已在播放 BGM，ensure 后恢复
+    if (this.bgmTheme >= 0) this.bgmStart(this.bgmTheme);
   }
   toggle() {
     this.ensure();
@@ -485,6 +491,41 @@ class AudioSystem {
     osc.start(t);
     osc.stop(t + dur + 0.02);
   }
+  // ── 背景音乐：Web Audio 合成循环（5 章节主题不同）──
+  // 主题：0森林轻快 / 1沙漠低沉 / 2冰原空灵 / 3火狱激昂 / 4暗影诡异
+  bgmStart(theme) {
+    this.ensure();
+    if (!this.ctx) return;
+    this.bgmStop();
+    this.bgmTheme = theme;
+    const T = BGM_THEMES[theme] || BGM_THEMES[0];
+    const beatMs = 60000 / T.bpm;
+    this.bgmStep = 0;
+    this.bgmTimer = setInterval(() => {
+      if (this.muted || !this.ctx) return;
+      const step = this.bgmStep++;
+      const note = T.scale[step % T.scale.length];
+      if (note > 0) this._bgmNote(note, beatMs / 1000 * 0.85, T.wave, T.vol);
+      if (step % 4 === 0) this._bgmNote(T.bass, beatMs / 1000 * 3.2, "sine", T.bassVol);
+    }, beatMs);
+  }
+  bgmStop() {
+    if (this.bgmTimer) { clearInterval(this.bgmTimer); this.bgmTimer = null; }
+  }
+  _bgmNote(freq, dur, wave, gain) {
+    const t = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    osc.type = wave;
+    osc.frequency.setValueAtTime(freq, t);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(gain, t + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    osc.connect(g);
+    g.connect(this.master);
+    osc.start(t);
+    osc.stop(t + dur + 0.03);
+  }
   shoot() { this.tone(520, 0.06, "triangle", 0.18, 1.8); }
   hit() { this.tone(180, 0.08, "square", 0.12, 0.65); }
   upgrade() { this.tone(660, 0.12, "sine", 0.22, 1.7); setTimeout(() => this.tone(920, 0.1, "sine", 0.18, 1.35), 55); }
@@ -494,6 +535,15 @@ class AudioSystem {
   sword() { this.tone(760, 0.08, "triangle", 0.12, 1.25); }
   coin() { this.tone(1320, 0.05, "sine", 0.07, 1.9); }
 }
+
+// BGM 主题配置：音阶（Hz）+ BPM + 波形 + 音量
+const BGM_THEMES = [
+  { name: "森林", bpm: 132, wave: "triangle", vol: 0.05, bass: 131, bassVol: 0.035, scale: [523, 659, 784, 659, 880, 784, 659, 523] },   // C大调轻快
+  { name: "沙漠", bpm: 92, wave: "sine", vol: 0.055, bass: 98, bassVol: 0.04, scale: [196, 220, 262, 220, 294, 262, 220, 196] },         // 低沉神秘
+  { name: "冰原", bpm: 76, wave: "sine", vol: 0.05, bass: 196, bassVol: 0.03, scale: [784, 988, 784, 659, 784, 988, 1175, 988] },        // 空灵高音
+  { name: "火狱", bpm: 150, wave: "sawtooth", vol: 0.04, bass: 110, bassVol: 0.035, scale: [440, 554, 659, 554, 880, 659, 554, 440] },  // 激昂
+  { name: "暗影", bpm: 84, wave: "square", vol: 0.035, bass: 55, bassVol: 0.03, scale: [220, 233, 220, 208, 220, 233, 262, 233] }       // 诡异半音
+];
 
 const audio = new AudioSystem();
 
@@ -776,9 +826,10 @@ class Arrow {
 
 class Bullet {
   constructor() { this.active = false; }
-  init(x, y, vx, vy, r = 7, damage = 10) {
+  init(x, y, vx, vy, r = 7, damage = 10, elem = null) {
     this.active = true;
     this.x = x; this.y = y; this.vx = vx; this.vy = vy; this.r = r; this.damage = damage;
+    this.elem = elem; // "fire" 灼烧 / "ice" 减速 / "poison" 中毒 / null 无
   }
   update(dt, game) {
     this.x += this.vx * dt;
@@ -787,13 +838,20 @@ class Bullet {
     if (this.active && game.player.canBeHit() && Util.circleHit(this, game.player)) {
       this.active = false;
       game.player.hurt(this.damage, game, 0, 36);
+      // 属性弹：命中附加 DOT/减速
+      if (this.elem === "fire") game.player.fireDotT = 3;       // 灼烧 3 秒
+      else if (this.elem === "poison") game.player.poisonDotT = 3; // 中毒 3 秒
+      else if (this.elem === "ice") game.player.iceSlowT = 2.5;   // 减速 2.5 秒
     }
   }
   render(g) {
     g.save();
+    // 属性弹渲染：火=橙红 / 冰=冰蓝 / 毒=毒绿 / 普通=琥珀
+    if (this.elem === "fire") { g.shadowColor = "#ff5a3d"; g.fillStyle = "#ff9b6b"; }
+    else if (this.elem === "ice") { g.shadowColor = "#5fc6ff"; g.fillStyle = "#9fe8ff"; }
+    else if (this.elem === "poison") { g.shadowColor = "#8aff5c"; g.fillStyle = "#b8ff8a"; }
+    else { g.shadowColor = "#ff7043"; g.fillStyle = "#ffb15b"; }
     g.shadowBlur = 13;
-    g.shadowColor = "#ff7043";
-    g.fillStyle = "#ffb15b";
     g.beginPath();
     g.arc(this.x, this.y, this.r, 0, TAU);
     g.fill();
@@ -1104,7 +1162,7 @@ class Enemy {
       const dy = game.player.y - this.y;
       const d = Math.max(1, Math.hypot(dx, dy));
       // 冲刺怪（小兵/精英swift）加速冲脸，其他缓慢逼近
-      // v3.39: 移速随章节缩放——第1章慢(×0.85)后期快(×1.1)，初始章节不再瞬追
+      // v3.40: 移速随章节缩放——第1章慢(×0.85)后期快(×1.1)，初始章节不再瞬追
       const ch = (game.chapter || 1);
       const chSpd = 0.85 + ch * 0.05;
       const chase = (this.type === "minion" ? (this.isElite ? 140 : 100)
@@ -1170,7 +1228,11 @@ class Enemy {
         const bulletDmg = 8 + ch * 1.5;
         const bvx = ldx / llen * (180 + ch * 6);
         const bvy = ldy / llen * (180 + ch * 6);
-        game.bullets.get(this.x, this.y + this.r * 0.4, bvx, bvy, 7, bulletDmg);
+        // 属性弹：第3章起 archer 25% 冰弹（减速玩家），精英 40% 随机属性（火/冰/毒）
+        let elem = null;
+        if (this.isElite && Math.random() < 0.4) elem = Util.pick(["fire", "ice", "poison"]);
+        else if (ch >= 3 && Math.random() < 0.25) elem = "ice";
+        game.bullets.get(this.x, this.y + this.r * 0.4, bvx, bvy, 7, bulletDmg, elem);
         // 30% 概率连射第二发（预判偏移，逼玩家侧移）
         if (Math.random() < 0.3 + ch * 0.02) {
           const off = Util.rand(-0.1, 0.1);
@@ -1193,7 +1255,7 @@ class Enemy {
     // 精英专属技能：swift 疾冲 / armored 震地 / splitter 自爆分裂加速
     if (this.isElite && !this.isBoss) {
       if (this.eliteAffix === "swift") {
-        // 疾冲：周期性爆发冲刺（v3.39: 削弱——之前2.6s一次130px瞬移粘人甩不掉）
+        // 疾冲：周期性爆发冲刺（v3.40: 削弱——之前2.6s一次130px瞬移粘人甩不掉）
         this.dashT = (this.dashT || 0) - dt;
         if (this.dashT <= 0) {
           this.dashT = 3.2;
@@ -1216,7 +1278,7 @@ class Enemy {
       } else if (this.eliteAffix === "splitter") {
         // 分裂怪：低血时（<40%）才加速冲脸——之前无条件每帧冲脸导致"快+粘人甩不掉"
         // ⚠️ 注意：chaseSpeed 是上面 if 块的块级 let 变量，这里引用会 ReferenceError
-        // 导致 rAF 主循环中断 = 游戏"卡住"（曾修过：v3.39 前的卡死根因）
+        // 导致 rAF 主循环中断 = 游戏"卡住"（曾修过：v3.40 前的卡死根因）
         if (this.hp < this.maxHp * 0.4) {
           const sdx = game.player.x - this.x, sdy = game.player.y - this.y;
           const sd = Math.max(1, Math.hypot(sdx, sdy));
@@ -1229,7 +1291,7 @@ class Enemy {
     if (this.isBoss) this.updateBoss(dt, game, slow);
     if (this.y > CONFIG.H + this.r + 80) this.active = false;
     if (!this.dead && game.player.canBeHit() && Util.circleHit(this, game.player)) {
-      // 碰撞伤害随章节成长（v3.39: 前期温和 13+ch×2，第1章15 可挨3下）
+      // 碰撞伤害随章节成长（v3.40: 前期温和 13+ch×2，第1章15 可挨3下）
       const hitDmg = 13 + (game.chapter || 1) * 2;
       game.player.hurt(hitDmg, game, Math.sign(game.player.x - this.x) * 90, 50);
     }
@@ -1260,7 +1322,7 @@ class Enemy {
     }
     const enrageMult = enrage ? 1.5 : 1;
     // 逼近速度：保持中距压制（太近会退，太远会追）——x/y 同时逼近
-    // v3.39: 狂暴追速 1.25→1.5，压迫感更强
+    // v3.40: 狂暴追速 1.25→1.5，压迫感更强
     const chaseSpeed = 70 * slow * (enrage ? 1.5 : 1);
     this.x += dx / d * chaseSpeed * dt;
     this.y += dy / d * chaseSpeed * 0.8 * dt;
@@ -1268,14 +1330,14 @@ class Enemy {
     this.rushT -= dt;
     if (this.rushT <= 0) {
       this.rushT = (enrage ? 1.5 : 3.2) + Util.rand(0, 1.2);
-      this.rushing = 1.5; // v3.39: 1.1→1.5s，冲锋距离拉长 36%
+      this.rushing = 1.5; // v3.40: 1.1→1.5s，冲锋距离拉长 36%
       this.rushDirX = dx / d;
       this.rushDirY = dy / d;
       audio.boss();
     }
     if (this.rushing > 0) {
       this.rushing -= dt;
-      const rushSpd = 300 * (enrage ? 1.3 : 1); // v3.39: 240→300
+      const rushSpd = 300 * (enrage ? 1.3 : 1); // v3.40: 240→300
       this.x += this.rushDirX * rushSpd * dt;
       this.y += this.rushDirY * rushSpd * dt;
     }
@@ -1288,7 +1350,7 @@ class Enemy {
     // 多样化攻击：随机攻击顺序（不固定轮换，玩家无法背板）+ 专属 Zone 技能 40% 概率
     this.shootT -= dt;
     if (this.shootT <= 0) {
-      // 狂暴时攻击更密：普通攻击间隔乘 0.5（v3.39: 0.65→0.5，狂暴攻速翻倍体感明显）
+      // 狂暴时攻击更密：普通攻击间隔乘 0.5（v3.40: 0.65→0.5，狂暴攻速翻倍体感明显）
       const cdMult = enrage ? 0.5 : 1;
       // 45% 概率放专属地面技能（zone），否则随机普通攻击
       if (Math.random() < 0.45) {
@@ -1448,7 +1510,7 @@ class Enemy {
       g.shadowBlur = 18;
       g.shadowColor = CONFIG.COLORS.red;
     } else if (this.isBoss && this.hp < this.maxHp * 0.35) {
-      // 狂暴持续特效：红色发光 + 呼吸脉冲（v3.39 新增，狂暴体感明显）
+      // 狂暴持续特效：红色发光 + 呼吸脉冲（v3.40 新增，狂暴体感明显）
       const pulse = 0.5 + 0.5 * Math.sin(performance.now() * 0.012);
       g.shadowBlur = 26 + 14 * pulse;
       g.shadowColor = "#ff3b30";
@@ -1650,10 +1712,12 @@ class Player {
     this.y = CONFIG.PLAYER_Y;
     this.r = CONFIG.PLAYER_R;
     this.hp = 50;
-    this.maxHp = 50; // v3.39: 40→50，前期容错（第1章碰撞15可挨3下）
+    this.maxHp = 50; // v3.40: 40→50，前期容错（第1章碰撞15可挨3下）
     this.moveSpeed = CONFIG.BASE_MOVE_SPEED;
     this.damage = CONFIG.BASE_ARROW_DAMAGE;
     this.fireRate = CONFIG.BASE_FIRE_RATE;
+    this.roomDmg = 0;   // 本房间伤害增益（穿门重置）
+    this.roomRate = 1;  // 本房间射速倍率（穿门重置）
     this.range = CONFIG.BASE_RANGE;
     this.arrowCount = 1;
     this.pierce = 0;
@@ -1682,6 +1746,9 @@ class Player {
     this.swift = 0;         // 迅捷（箭速）
     this.ricochet = 0;      // 弹射敌人数
     this.frostZoneT = 0;    // 冰域减速计时
+    this.fireDotT = 0;      // 灼烧 DOT（属性弹）
+    this.poisonDotT = 0;    // 中毒 DOT（属性弹）
+    this.iceSlowT = 0;      // 减速（属性弹）
     // 法杖专属卡
     this.stavePower = 0;    // 法力强化（能量球 +20% 伤害/级）
     this.staveSplit = false; // 法球分裂
@@ -1743,13 +1810,27 @@ class Player {
       targetY += (game.input.down - game.input.up) * this.moveSpeed * 0.75 * dt;
     }
     this.frostZoneT = Math.max(0, (this.frostZoneT || 0) - dt);
+    // 属性弹 DOT/减速结算（火=灼烧 4/秒，毒=中毒 3/秒，冰=减速 45%）
+    if (this.fireDotT > 0) {
+      this.fireDotT -= dt;
+      this.hp -= 4 * dt;
+      if (Math.random() < 0.5) game.particles.get(this.x, this.y - 20, Util.rand(-15, 15), Util.rand(-25, 5), 0.4, "#ff7b3d", Util.rand(2, 4));
+    }
+    if (this.poisonDotT > 0) {
+      this.poisonDotT -= dt;
+      this.hp -= 3 * dt;
+      if (Math.random() < 0.4) game.particles.get(this.x, this.y - 16, Util.rand(-12, 12), Util.rand(-20, 5), 0.4, "#8aff5c", Util.rand(2, 4));
+    }
+    this.iceSlowT = Math.max(0, (this.iceSlowT || 0) - dt);
+    if (this.hp <= 0) game.gameOver();
     const zoneSlow = this.frostZoneT > 0 ? 0.4 : 1;
+    const slowMul = this.iceSlowT > 0 ? 0.55 : 1;
     // 移动：触摸/鼠标跟随受移速限制（防瞬移——甩鼠标不能瞬移，移速卡有意义）
     // 之前 Math.min(1, dt*14) 指数插值：鼠标甩对角玩家飞过去（瞬移感）+ 移速卡失效
     if (game.input.touching || game.input.hover) {
       const dx = targetX - this.x, dy = targetY - this.y;
       const dist = Math.hypot(dx, dy);
-      const step = this.moveSpeed * zoneSlow * dt;
+      const step = this.moveSpeed * zoneSlow * slowMul * dt; // 冰弹减速生效
       if (dist > step) {
         this.x += dx / dist * step;
         this.y += dy / dist * step;
@@ -2087,12 +2168,13 @@ function rollChoices() {
 }
 
 function getInRunShopItems() {
+  // 局内强化：仅本房间有效（伤害/射速穿门重置；HP/护盾延续）；价格阶梯上涨（买一个全部×1.5）
+  // 多重箭只能从三选一卡片获得，不再商店出售
   return [
-    { id: "shop_dmg", name: "伤害训练", icon: "伤", price: 20, desc: "本局伤害 +10%", apply: g => { g.player.damage += Math.round(CONFIG.BASE_ARROW_DAMAGE * 0.10); } },
-    { id: "shop_rate", name: "疾射药剂", icon: "速", price: 20, desc: "本局射速 +10%", apply: g => { g.player.fireRate = Math.min(6, g.player.fireRate * 1.10); } },
-    { id: "shop_heal", name: "生命药水", icon: "心", price: 20, desc: "回复 50% 生命", apply: g => { g.player.hp = Math.min(g.player.maxHp, g.player.hp + g.player.maxHp * 0.5); } },
-    { id: "shop_shield", name: "护盾符文", icon: "盾", price: 20, desc: "护盾 +1", apply: g => { g.player.shield = (g.player.shield || 0) + 1; } },
-    { id: "shop_arrow", name: isStaveMode() ? "法球连发" : "多重箭袋", icon: isStaveMode() ? "球" : "箭", price: 20, desc: isStaveMode() ? "能量球 +1" : "箭矢 +1", apply: g => { g.player.arrowCount = Math.min(3, g.player.arrowCount + 1); } }
+    { id: "shop_dmg", name: "伤害训练", icon: "伤", basePrice: 20, desc: "本房间伤害 +10%", apply: g => { const add = Math.max(1, Math.round(g.player.damage * 0.10)); g.player.roomDmg = (g.player.roomDmg || 0) + add; g.player.damage += add; } },
+    { id: "shop_rate", name: "疾射药剂", icon: "速", basePrice: 20, desc: "本房间射速 +10%", apply: g => { const mul = 1.10; g.player.roomRate = (g.player.roomRate || 1) * mul; g.player.fireRate = Math.min(6, g.player.fireRate * mul); } },
+    { id: "shop_heal", name: "生命药水", icon: "心", basePrice: 15, desc: "回复 50% 生命（延续）", apply: g => { g.player.hp = Math.min(g.player.maxHp, g.player.hp + g.player.maxHp * 0.5); } },
+    { id: "shop_shield", name: "护盾符文", icon: "盾", basePrice: 15, desc: "护盾 +1（延续）", apply: g => { g.player.shield = (g.player.shield || 0) + 1; } }
   ];
 }
 
@@ -2148,12 +2230,12 @@ function gainHeroExp(game, kills, chapter, roomIndex) {
   return leveled;
 }
 
-// 武器皮肤：不同样式 + 不同加成（换武器动力）
+// 武器：不同价格分段 = 不同强度（金币收益递增，武器升级目标明确）
 const WEAPON_SKINS = [
   { id: 0, name: "木弓", icon: "弓", price: 0, color: "#8b5a2b", desc: "初始武器，无加成", bonus: {} },
-  { id: 1, name: "火焰弓", icon: "🔥", price: 120, color: "#e54d3c", desc: "伤害 +8%，灼烧伤害 +50%", bonus: { dmg: 1.08, burn: 1.5 } },
-  { id: 2, name: "冰霜弓", icon: "❄", price: 150, color: "#5fc6ff", desc: "减速效果 +40%，射速 +6%", bonus: { slow: 1.4, rate: 1.06 } },
-  { id: 3, name: "雷神弓", icon: "⚡", price: 200, color: "#f7c948", desc: "暴击率 +12%，箭速 +15%", bonus: { crit: 0.12, arrowSpeed: 1.15 } }
+  { id: 1, name: "火焰弓", icon: "🔥", price: 120, color: "#e54d3c", desc: "自带灼烧，伤害 +15%", bonus: { elem: "fire", dmg: 1.15 } },
+  { id: 2, name: "冰霜弓", icon: "❄", price: 200, color: "#5fc6ff", desc: "自带减速，射速 +12%", bonus: { elem: "ice", rate: 1.12 } },
+  { id: 3, name: "雷神弓", icon: "⚡", price: 320, color: "#f7c948", desc: "自带弹射，暴击 +20%，箭速 +20%", bonus: { elem: "volt", crit: 0.2, arrowSpeed: 1.2 } }
 ];
 // 法杖：第二武器路线（重击流——单发高伤 + 自带元素，与弓的快攻形成明显区分）
 // 弓 DPS≈28（14伤×2速） vs 法杖 DPS≈29（26.6伤×1.1速）——总输出接近但手感截然不同：
@@ -2161,8 +2243,8 @@ const WEAPON_SKINS = [
 const WEAPON_STAVES = [
   { id: 0, name: "木法杖", icon: "🪄", price: 0, color: "#8b6a4a", desc: "初始法杖：重击流，无元素", bonus: { dmg: 1.9, rate: 0.55, elem: null } },
   { id: 1, name: "火焰法杖", icon: "🔥", price: 160, color: "#e54d3c", desc: "自带灼烧，元素伤害 +30%", bonus: { dmg: 1.95, rate: 0.55, elem: "fire", elemBoost: 1.3 } },
-  { id: 2, name: "冰霜法杖", icon: "❄", price: 190, color: "#5fc6ff", desc: "自带减速，元素伤害 +30%", bonus: { dmg: 1.95, rate: 0.55, elem: "ice", elemBoost: 1.3 } },
-  { id: 3, name: "雷电法杖", icon: "⚡", price: 240, color: "#f7c948", desc: "自带弹射，暴击率 +15%", bonus: { dmg: 2.0, rate: 0.55, elem: "volt", crit: 0.15 } }
+  { id: 2, name: "冰霜法杖", icon: "❄", price: 240, color: "#5fc6ff", desc: "自带减速，元素伤害 +30%", bonus: { dmg: 1.95, rate: 0.55, elem: "ice", elemBoost: 1.3 } },
+  { id: 3, name: "雷电法杖", icon: "⚡", price: 380, color: "#f7c948", desc: "自带弹射，暴击率 +20%", bonus: { dmg: 2.0, rate: 0.55, elem: "volt", crit: 0.2 } }
 ];
 function getWeaponSkin() {
   // 局内购买的武器（weaponSkinOverride）本局优先；否则永远用免费木弓（武器不再永久）
@@ -2227,8 +2309,10 @@ function applyWeaponSkin(player) {
   if (skin.bonus.rate) player.fireRate *= skin.bonus.rate;
   if (skin.bonus.crit) player.crit = Math.min(0.6, player.crit + skin.bonus.crit);
   if (skin.bonus.arrowSpeed) player.arrowSpeed = CONFIG.BASE_ARROW_SPEED * skin.bonus.arrowSpeed;
-  if (skin.bonus.burn) player.burnMult = skin.bonus.burn;
-  if (skin.bonus.slow) player.slowMult = skin.bonus.slow;
+  // 弓武器自带元素（火焰弓灼烧 / 冰霜弓减速 / 雷神弓弹射）——武器不只是皮肤，有实际效果
+  if (skin.bonus.elem === "fire") player.fire = true;
+  if (skin.bonus.elem === "ice") player.ice = true;
+  if (skin.bonus.elem === "volt") player.volt = Math.max(player.volt || 0, 1);
 }
 
 const SaveSystem = {
@@ -2380,6 +2464,7 @@ class Game {
   }
   start() {
     audio.ensure();
+    audio.bgmStart(themeForChapter(this.chapter || 1)); // 开局按章节播放背景音乐
     this.playerName = Leaderboard.ensurePlayerName();
     this.state = "PLAY";
     this.player.reset();
@@ -2567,7 +2652,12 @@ class Game {
     this.gate = null;
     this.chest = null;
     this.boss = null;
-    if (newChapter) this.inRunShop = null; // 仅新章重置商店商品
+    // 房间临时增益重置：伤害/射速仅本房间有效（穿门撤销），HP/护盾延续
+    if (this.player.roomDmg) { this.player.damage = Math.max(CONFIG.BASE_ARROW_DAMAGE, this.player.damage - this.player.roomDmg); this.player.roomDmg = 0; }
+    if (this.player.roomRate && this.player.roomRate !== 1) { this.player.fireRate = Math.min(6, this.player.fireRate / this.player.roomRate); this.player.roomRate = 1; }
+    // 商店商品每房间重置（价格回到基准、全部可买——阶梯涨价只对本房间生效）
+    this.inRunShop = null;
+    if (newChapter) this.inRunShop = null; // 保留兼容
     this.arrows.items.length = 0;
     this.bullets.items.length = 0;
     this.enemies.items.length = 0;
@@ -2625,15 +2715,17 @@ class Game {
     }
   }
   spawnShopRoom() {
-    // 同章内商店共享同一批商品（已买的不重置，防重复购买堆叠）
+    // 商店商品每房间重置（价格回基准、全部可买；阶梯涨价只对本房间生效）
     if (!this.inRunShop) this.inRunShop = { items: getInRunShopItems(), pulse: 0 };
-    this.flashMessage("神秘商人：局内金币可购买临时强化");
+    for (const it of this.inRunShop.items) { it.price = it.basePrice; it.sold = false; }
+    this.flashMessage("神秘商人：局内金币可购买临时强化（仅本房间有效）");
   }
   // 局内商店：战斗中随时打开（暂停战斗，花局内金币买临时强化）
   openInRunShop() {
     if (this.state !== "PLAY") return;
     if (!this.inRunShop) {
       this.inRunShop = { items: getInRunShopItems(), pulse: 0, tab: 0 };
+      for (const it of this.inRunShop.items) { it.price = it.basePrice; it.sold = false; }
     }
     this.inRunShop.paused = true;
   }
@@ -2752,7 +2844,11 @@ class Game {
     this.player.pickedUpgrades.push({ id: item.id, name: item.name, icon: item.icon, rarity: "shop", faction: "shop" });
     // 图鉴解锁：商店技能
     codexUnlock("skills", item.id);
-    this.flashMessage(`${item.name}：购买成功`);
+    // 价格阶梯：买一个 → 所有未买商品 ×1.5（只对本房间生效，下房间重置）
+    for (const it of this.inRunShop.items) {
+      if (!it.sold) it.price = Math.round((it.price || it.basePrice || 20) * 1.5);
+    }
+    this.flashMessage(`${item.name}：购买成功（其余商品已涨价）`);
     audio.upgrade();
     return true;
   }
@@ -4446,7 +4542,7 @@ function drawMenu(g, state) {
   g.shadowBlur = 6 + 6 * pulse;
   g.fillStyle = "#d4c6af";
   g.font = "20px Microsoft YaHei, sans-serif";
-  g.fillText("v3.39 · 房间闯关 · 排行榜 · 每日挑战", CONFIG.W / 2, 292);
+  g.fillText("v3.40 · 房间闯关 · 排行榜 · 每日挑战", CONFIG.W / 2, 292);
   g.fillStyle = "#ffe59a";
   g.font = "bold 18px Microsoft YaHei, sans-serif";
   g.fillText(Leaderboard.champion || "暂无王者", CONFIG.W / 2, 326);
