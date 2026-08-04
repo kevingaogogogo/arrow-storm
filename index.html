@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-  <title>箭雨 v3.48</title>
+  <title>箭雨 v3.49</title>
   <style>
     html, body {
       margin: 0;
@@ -50,8 +50,8 @@
   </style>
 </head>
 <body>
-  <canvas id="game" width="540" height="960" aria-label="箭雨 v3.48 游戏画布"></canvas>
-  <div id="landscapeBlocker">请旋转设备为竖屏<br>箭雨 v3.48 仅支持竖屏飞行</div>
+  <canvas id="game" width="540" height="960" aria-label="箭雨 v3.49 游戏画布"></canvas>
+  <div id="landscapeBlocker">请旋转设备为竖屏<br>箭雨 v3.49 仅支持竖屏飞行</div>
 <script>
 "use strict";
 
@@ -411,10 +411,10 @@ const THEMES = [
 let themeIndex = 0;
 let themeTrans = 0; // 0=无过渡, 1=切换中
 function getTheme() { return THEMES[themeIndex]; }
-const ROOM_SEQUENCE = ["battle", "battle", "shop", "battle", "elite", "boss"];
+const ROOM_SEQUENCE = ["battle", "safe", "battle", "elite", "safe", "boss"];
 const ROOM_LABEL = {
   battle: "战斗房",
-  shop: "神秘商人",
+  safe: "无怪房",
   elite: "精英房",
   boss: "BOSS房"
 };
@@ -2809,9 +2809,8 @@ class Game {
   spawnRoom() {
     this.spawnedWave = this.wave;
     const difficulty = this.wave;
-    if (this.roomType === "shop") {
-      this.spawnShopRoom();
-      this.spawnGate();
+    if (this.roomType === "safe") {
+      this.spawnSafeRoom();
       return;
     }
     if (this.roomType === "boss") {
@@ -2849,10 +2848,13 @@ class Game {
       }
     }
   }
-  spawnShopRoom() {
-    // 商店房：不自动弹面板（原 inRunShop 预置导致进房自动弹窗）——改为提示，玩家点右下角 🛒 打开
-    this.inRunShop = null;
-    this.flashMessage("神秘商人：点击右下角 🛒 商店购买临时强化（仅本房间有效）");
+  spawnSafeRoom() {
+    // 无怪房：进房直接弹出三选一，选完自动出传送门（弓箭传说2式奖励房）
+    this.choices = rollChoices();
+    this.state = "CHOOSE";
+    this.chooseT = 0.35;
+    audio.upgrade();
+    this.flashMessage("无怪房：选择一张强化卡");
   }
   // 局内商店：战斗中随时打开（暂停战斗，花局内金币买临时强化）
   openInRunShop() {
@@ -2927,7 +2929,7 @@ class Game {
     if (d < this.gate.r + this.player.r) this.advanceRoom();
   }
   checkRoomClear() {
-    if (this.roomCleared || this.gate || this.choices || this.roomType === "shop") return;
+    if (this.roomCleared || this.gate || this.choices || this.roomType === "safe") return;
     if (this.chest || this.boss) return;
     const alive = this.enemies.active().some(e => !e.dead);
     if (alive) return;
@@ -2940,10 +2942,8 @@ class Game {
       game.particles.get(c.x, c.y, Util.rand(-20, 20), Util.rand(-40, 10), 0.3, "#f7c948", Util.rand(2, 4));
     }
     if (this.roomType === "battle" || this.roomType === "elite") {
-      this.choices = rollChoices();
-      this.state = "CHOOSE";
-      this.chooseT = 0.35;
-      audio.upgrade();
+      // 弓箭传说2式：战斗房清怪后直接出传送门，三选一留给无怪房
+      this.spawnGate();
     } else if (this.roomType === "boss") {
       this.spawnGate();
     }
@@ -4721,7 +4721,7 @@ function drawMenu(g, state) {
   g.shadowBlur = 6 + 6 * pulse;
   g.fillStyle = "#d4c6af";
   g.font = "20px Microsoft YaHei, sans-serif";
-  g.fillText("v3.48 · 房间闯关 · 排行榜 · 每日挑战", CONFIG.W / 2, 292);
+  g.fillText("v3.49 · 房间闯关 · 排行榜 · 每日挑战", CONFIG.W / 2, 292);
   g.fillStyle = "#ffe59a";
   g.font = "bold 18px Microsoft YaHei, sans-serif";
   g.fillText(Leaderboard.champion || "暂无王者", CONFIG.W / 2, 326);
