@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-  <title>箭雨 v3.46</title>
+  <title>箭雨 v3.47</title>
   <style>
     html, body {
       margin: 0;
@@ -50,8 +50,8 @@
   </style>
 </head>
 <body>
-  <canvas id="game" width="540" height="960" aria-label="箭雨 v3.46 游戏画布"></canvas>
-  <div id="landscapeBlocker">请旋转设备为竖屏<br>箭雨 v3.46 仅支持竖屏飞行</div>
+  <canvas id="game" width="540" height="960" aria-label="箭雨 v3.47 游戏画布"></canvas>
+  <div id="landscapeBlocker">请旋转设备为竖屏<br>箭雨 v3.47 仅支持竖屏飞行</div>
 <script>
 "use strict";
 
@@ -663,7 +663,7 @@ class Arrow {
   update(dt, game) {
     this.lastX = this.x; this.lastY = this.y;
     // 追踪箭：持续朝最近敌人转向（拐弯追人）
-    // v3.46: 多箭按序号锁定不同目标（第1支追最近、第2支追次近…），弹道分离不重叠
+    // v3.47: 多箭按序号锁定不同目标（第1支追最近、第2支追次近…），弹道分离不重叠
     if (this.homing) {
       let best = null, bestD = 999999, bestI = -1;
       const wantIdx = this.arrowIdx % 3;
@@ -1145,7 +1145,7 @@ class Enemy {
     } else {
       game.shake = Math.max(game.shake || 0, 3.5);
     }
-    // 金币掉落：收紧经济（v3.46：小兵2→1/弓手3→2/坦克5→3/精英4→3倍/Boss40→30），第1章≈75金
+    // 金币掉落：收紧经济（v3.47：小兵2→1/弓手3→2/坦克5→3/精英4→3倍/Boss40→30），第1章≈75金
     const base = this.isBoss ? 30 : { minion: 1, archer: 2, tank: 3, flyer: 2 }[this.type] || 1;
     // 招财天赋：金币获取加成
     const goldMult = (game.player.heroGoldMult || 1);
@@ -1206,7 +1206,7 @@ class Enemy {
       const dy = game.player.y - this.y;
       const d = Math.max(1, Math.hypot(dx, dy));
       // 冲刺怪（小兵/精英swift）加速冲脸，其他缓慢逼近
-      // v3.46: 移速随章节缩放——第1章慢(×0.85)后期快(×1.1)，初始章节不再瞬追
+      // v3.47: 移速随章节缩放——第1章慢(×0.85)后期快(×1.1)，初始章节不再瞬追
       const ch = (game.chapter || 1);
       const chSpd = 0.85 + ch * 0.05;
       const chase = (this.type === "minion" ? (this.isElite ? 140 : 100)
@@ -1299,7 +1299,7 @@ class Enemy {
     // 精英专属技能：swift 疾冲 / armored 震地 / splitter 自爆分裂加速
     if (this.isElite && !this.isBoss) {
       if (this.eliteAffix === "swift") {
-        // 疾冲：周期性爆发冲刺（v3.46: 削弱——之前2.6s一次130px瞬移粘人甩不掉）
+        // 疾冲：周期性爆发冲刺（v3.47: 削弱——之前2.6s一次130px瞬移粘人甩不掉）
         this.dashT = (this.dashT || 0) - dt;
         if (this.dashT <= 0) {
           this.dashT = 3.2;
@@ -1322,7 +1322,7 @@ class Enemy {
       } else if (this.eliteAffix === "splitter") {
         // 分裂怪：低血时（<40%）才加速冲脸——之前无条件每帧冲脸导致"快+粘人甩不掉"
         // ⚠️ 注意：chaseSpeed 是上面 if 块的块级 let 变量，这里引用会 ReferenceError
-        // 导致 rAF 主循环中断 = 游戏"卡住"（曾修过：v3.46 前的卡死根因）
+        // 导致 rAF 主循环中断 = 游戏"卡住"（曾修过：v3.47 前的卡死根因）
         if (this.hp < this.maxHp * 0.4) {
           const sdx = game.player.x - this.x, sdy = game.player.y - this.y;
           const sd = Math.max(1, Math.hypot(sdx, sdy));
@@ -1335,7 +1335,7 @@ class Enemy {
     if (this.isBoss) this.updateBoss(dt, game, slow);
     if (this.y > CONFIG.H + this.r + 80) this.active = false;
     if (!this.dead && game.player.canBeHit() && Util.circleHit(this, game.player)) {
-      // 碰撞伤害随章节成长（v3.46: 前期温和 13+ch×2，第1章15 可挨3下）
+      // 碰撞伤害随章节成长（v3.47: 前期温和 13+ch×2，第1章15 可挨3下）
       const hitDmg = 13 + (game.chapter || 1) * 2;
       game.player.hurt(hitDmg, game, Math.sign(game.player.x - this.x) * 90, 50);
     }
@@ -1366,7 +1366,7 @@ class Enemy {
     }
     const enrageMult = enrage ? 1.5 : 1;
     // 逼近速度：保持中距压制（太近会退，太远会追）——x/y 同时逼近
-    // v3.46: 狂暴追速 1.25→1.5，压迫感更强
+    // v3.47: 狂暴追速 1.25→1.5，压迫感更强
     const chaseSpeed = 70 * slow * (enrage ? 1.5 : 1);
     this.x += dx / d * chaseSpeed * dt;
     this.y += dy / d * chaseSpeed * 0.8 * dt;
@@ -1374,14 +1374,14 @@ class Enemy {
     this.rushT -= dt;
     if (this.rushT <= 0) {
       this.rushT = (enrage ? 1.5 : 3.2) + Util.rand(0, 1.2);
-      this.rushing = 1.5; // v3.46: 1.1→1.5s，冲锋距离拉长 36%
+      this.rushing = 1.5; // v3.47: 1.1→1.5s，冲锋距离拉长 36%
       this.rushDirX = dx / d;
       this.rushDirY = dy / d;
       audio.boss();
     }
     if (this.rushing > 0) {
       this.rushing -= dt;
-      const rushSpd = 300 * (enrage ? 1.3 : 1); // v3.46: 240→300
+      const rushSpd = 300 * (enrage ? 1.3 : 1); // v3.47: 240→300
       this.x += this.rushDirX * rushSpd * dt;
       this.y += this.rushDirY * rushSpd * dt;
     }
@@ -1394,7 +1394,7 @@ class Enemy {
     // 多样化攻击：随机攻击顺序（不固定轮换，玩家无法背板）+ 专属 Zone 技能 40% 概率
     this.shootT -= dt;
     if (this.shootT <= 0) {
-      // 狂暴时攻击更密：普通攻击间隔乘 0.5（v3.46: 0.65→0.5，狂暴攻速翻倍体感明显）
+      // 狂暴时攻击更密：普通攻击间隔乘 0.5（v3.47: 0.65→0.5，狂暴攻速翻倍体感明显）
       const cdMult = enrage ? 0.5 : 1;
       // 45% 概率放专属地面技能（zone），否则随机普通攻击
       if (Math.random() < 0.45) {
@@ -1554,7 +1554,7 @@ class Enemy {
       g.shadowBlur = 18;
       g.shadowColor = CONFIG.COLORS.red;
     } else if (this.isBoss && this.hp < this.maxHp * 0.35) {
-      // 狂暴持续特效：红色发光 + 呼吸脉冲（v3.46 新增，狂暴体感明显）
+      // 狂暴持续特效：红色发光 + 呼吸脉冲（v3.47 新增，狂暴体感明显）
       const pulse = 0.5 + 0.5 * Math.sin(performance.now() * 0.012);
       g.shadowBlur = 26 + 14 * pulse;
       g.shadowColor = "#ff3b30";
@@ -1756,7 +1756,7 @@ class Player {
     this.y = CONFIG.PLAYER_Y;
     this.r = CONFIG.PLAYER_R;
     this.hp = 50;
-    this.maxHp = 50; // v3.46: 40→50，前期容错（第1章碰撞15可挨3下）
+    this.maxHp = 50; // v3.47: 40→50，前期容错（第1章碰撞15可挨3下）
     this.moveSpeed = CONFIG.BASE_MOVE_SPEED;
     this.damage = CONFIG.BASE_ARROW_DAMAGE;
     this.fireRate = CONFIG.BASE_FIRE_RATE;
@@ -3908,25 +3908,19 @@ function drawChoiceCards(g, state) {
     g.fillStyle = rar.color;
     g.font = "bold 22px Microsoft YaHei, sans-serif";
     g.fillText(up.name, 0, 132);
-    // 稀有度标签
-    g.fillStyle = rar.color;
-    g.globalAlpha = 0.9;
-    g.font = "12px Microsoft YaHei, sans-serif";
-    g.fillText(rar.label, 0, 152);
-    g.globalAlpha = fade;
-    // 描述（两行）
+    // 描述（最多 2 行，超长截断省略号——防第三行与流派标签重叠）
     g.fillStyle = "#d8dde6";
     g.font = "14px Microsoft YaHei, sans-serif";
-    wrapText(g, up.desc, 0, 180, cardW - 24, 20);
-    // 流派标签：彩色胶囊（弹道金/元素紫/召唤蓝/生存绿）
+    wrapText(g, up.desc, 0, 168, cardW - 24, 20, 2);
+    // 流派标签：彩色胶囊（弹道金/元素紫/召唤蓝/生存绿），y198-218 贴卡底不压描述
     const FAC_COLOR = { shot: "#f7c948", elem: "#c77dff", summon: "#5fc6ff", surv: "#8affc1" };
     const fc = FAC_COLOR[up.faction] || "#b9c2d0";
     g.fillStyle = fc + "22";
-    roundRect(g, -34, 196, 68, 20, 10);
+    roundRect(g, -34, 198, 68, 20, 10);
     g.fill();
     g.strokeStyle = fc + "88";
     g.lineWidth = 1;
-    roundRect(g, -34, 196, 68, 20, 10);
+    roundRect(g, -34, 198, 68, 20, 10);
     g.stroke();
     g.fillStyle = fc;
     g.font = "bold 12px Microsoft YaHei, sans-serif";
@@ -3963,7 +3957,7 @@ function drawInRunShop(g, state) {
     const col = i % 3;
     const row = Math.floor(i / 3);
     const x = 48 + col * (w + gap);
-    const y = 246 + row * 102;
+    const y = 246 + row * 106;
     const afford = (state.runGold || 0) >= item.price;
     g.fillStyle = item.sold ? "rgba(255,255,255,0.08)" : afford ? "rgba(247,201,72,0.16)" : "rgba(255,255,255,0.08)";
     roundRect(g, x, y, w, h, 8); g.fill();
@@ -3972,13 +3966,17 @@ function drawInRunShop(g, state) {
     roundRect(g, x, y, w, h, 8); g.stroke();
     g.fillStyle = item.sold ? "#8a94a3" : "#f7c948";
     g.font = "bold 22px Microsoft YaHei, sans-serif";
-    g.fillText(item.icon, x + w / 2, y + 28);
+    g.fillText(item.icon, x + w / 2, y + 26);
     g.fillStyle = "#f5ecd9";
     g.font = "bold 14px Microsoft YaHei, sans-serif";
-    g.fillText(item.name, x + w / 2, y + 50);
+    g.fillText(item.name, x + w / 2, y + 46);
+    // 效果说明（10px 小字，防止"买了不知道干嘛"）
+    g.fillStyle = "#9aa5b4";
+    g.font = "10px Microsoft YaHei, sans-serif";
+    g.fillText(String(item.desc || "").slice(0, 13), x + w / 2, y + 62);
     g.fillStyle = item.sold ? "#8a94a3" : afford ? "#f7c948" : "#c2a06a";
     g.font = "12px Microsoft YaHei, sans-serif";
-    g.fillText(item.sold ? "已购买" : `${item.price} 金币`, x + w / 2, y + 72);
+    g.fillText(item.sold ? "已购买" : `${item.price} 金币`, x + w / 2, y + 80);
   }
   // 武器区（局内金币购买，本局生效，死亡回免费武器）
   const s = SaveSystem.data;
@@ -4603,9 +4601,9 @@ function drawHud(g, state) {
   g.font = "12px Microsoft YaHei, sans-serif";
   g.fillText(`箭${p.arrowCount}${p.homing ? "·追" : ""}${p.pierceAll ? "·贯" : ""}${p.split ? "·裂" : ""}`, 24, CONFIG.H - 12);
   g.fillStyle = "#7fe0ff";
-  g.fillText(`盾${p.shield || 0}`, 104, CONFIG.H - 12);
+  g.fillText(`盾${p.shield || 0}`, 138, CONFIG.H - 12);
   g.fillStyle = "#ffb15b";
-  g.fillText(`御剑${p.swords.length}${p.swords.length > 0 ? `·CD${Math.round((0.9 * (p.swordCd || 1)) * 100) / 100}` : ""}`, 150, CONFIG.H - 12);
+  g.fillText(`御剑${p.swords.length}${p.swords.length > 0 ? `·CD${Math.round((0.9 * (p.swordCd || 1)) * 100) / 100}` : ""}`, 170, CONFIG.H - 12);
   // 详细面板按钮（右上角，📊）
   g.fillStyle = "rgba(168,101,255,0.2)";
   roundRect(g, CONFIG.W - 40, 16, 30, 30, 8); g.fill();
@@ -4721,7 +4719,7 @@ function drawMenu(g, state) {
   g.shadowBlur = 6 + 6 * pulse;
   g.fillStyle = "#d4c6af";
   g.font = "20px Microsoft YaHei, sans-serif";
-  g.fillText("v3.46 · 房间闯关 · 排行榜 · 每日挑战", CONFIG.W / 2, 292);
+  g.fillText("v3.47 · 房间闯关 · 排行榜 · 每日挑战", CONFIG.W / 2, 292);
   g.fillStyle = "#ffe59a";
   g.font = "bold 18px Microsoft YaHei, sans-serif";
   g.fillText(Leaderboard.champion || "暂无王者", CONFIG.W / 2, 326);
@@ -5019,15 +5017,24 @@ function roundRect(g, x, y, w, h, r) {
   g.closePath();
 }
 
-function wrapText(g, text, x, y, maxWidth, lineHeight) {
+function wrapText(g, text, x, y, maxWidth, lineHeight, maxLines) {
   let line = "";
+  let lines = 0;
   const chars = Array.from(text);
   for (let i = 0; i < chars.length; i++) {
     const test = line + chars[i];
     if (g.measureText(test).width > maxWidth && line) {
+      // 行数超限：截断加省略号（防文字溢出重叠）
+      if (maxLines && lines >= maxLines - 1) {
+        let cut = line;
+        while (cut.length > 1 && g.measureText(cut + "…").width > maxWidth) cut = cut.slice(0, -1);
+        g.fillText(cut + "…", x, y);
+        return;
+      }
       g.fillText(line, x, y);
       line = chars[i];
       y += lineHeight;
+      lines++;
     } else line = test;
   }
   if (line) g.fillText(line, x, y);
