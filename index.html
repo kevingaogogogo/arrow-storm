@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-  <title>箭雨 v3.52</title>
+  <title>箭雨 v3.53</title>
   <style>
     html, body {
       margin: 0;
@@ -50,8 +50,8 @@
   </style>
 </head>
 <body>
-  <canvas id="game" width="540" height="960" aria-label="箭雨 v3.52 游戏画布"></canvas>
-  <div id="landscapeBlocker">请旋转设备为竖屏<br>箭雨 v3.52 仅支持竖屏飞行</div>
+  <canvas id="game" width="540" height="960" aria-label="箭雨 v3.53 游戏画布"></canvas>
+  <div id="landscapeBlocker">请旋转设备为竖屏<br>箭雨 v3.53 仅支持竖屏飞行</div>
 <script>
 "use strict";
 
@@ -1211,9 +1211,11 @@ class Enemy {
     this.isElite = !this.isBoss && Math.random() < Math.min(0.3, 0.18 + (game.chapter || 1) * 0.02) && wave >= 2;
     this.eliteAffix = this.isElite ? Util.pick(["swift", "huge", "armored", "splitter"]) : null;
     // 难度曲线：敌人 HP 随波次增长（每波 +11%），基础值提高——第三章起玩家伤害高，需要更厚的怪
-    const chapBonus = 1 + Math.floor((SaveSystem.data.bestWave || 0) / 10) * 0.15;
-    const waveBonus = 1 + (wave - 1) * 0.11;
-    let hp = { minion: 30, archer: 44, tank: 110, flyer: 34, boss: 500 + wave * 85 }[type] * chapBonus * waveBonus;
+    // v3.53: ①Boss 波次成长减半（+5.5%/波）——Boss 强度主要靠章节+狂暴阶段，防第5章 Boss 过肉（曾达 2 万血）
+    // ②移除 bestWave 动态难度（历史最高波次永久加成）——卡关重开反而更难=负面螺旋，会让玩家失去兴趣；
+    //   难度只由当前波次+章节决定（越往后越难，但重开永远公平）
+    const waveBonus = 1 + (wave - 1) * (this.isBoss ? 0.055 : 0.11);
+    let hp = { minion: 30, archer: 44, tank: 110, flyer: 34, boss: 500 + wave * 85 }[type] * waveBonus;
     // 章节加成：每章敌人 HP 额外 +12%（第三章开始明显变厚，破无敌）
     hp *= 1 + ((game && game.chapter) || 1) * 0.12;
     // 精英词缀加成
@@ -1943,6 +1945,10 @@ class Player {
     this.swords = [];
     this.inv = 0;
     this.pickedUpgrades = [];
+    // 卡片已选次数计数（v3.53：has 前置条件基于次数而非属性值，防外部增益导致卡消失/重复选）
+    this.damagePick = 0;
+    this.ratePick = 0;
+    this.shieldPick = 0;
     this.fireT = 0;
     this.lastX = this.x;
     this.lastY = this.y;
@@ -2243,8 +2249,8 @@ const RARITY = {
 // icon 用简单字符图标（Canvas 绘制）
 const UPGRADES = [
   // ── 弹道系 ──
-  { id: "damage", name: "强弓", icon: "弓", rarity: "common", faction: "shot", weapon: "bow", desc: "弓箭伤害 +15%", max: 6, has: g => g.player.damagePick >= 6, apply: g => { g.player.damagePick = (g.player.damagePick || 0) + 1; g.player.damage += Math.round(CONFIG.BASE_ARROW_DAMAGE * 0.15); } },
-  { id: "rate", name: "疾射", icon: "速", rarity: "rare", faction: "shot", desc: "攻击频率 +12%", max: 6, has: g => g.player.fireRate >= 6, apply: g => { g.player.fireRate = Math.min(6, g.player.fireRate * 1.12); } },
+  { id: "damage", name: "强弓", icon: "弓", rarity: "common", faction: "shot", weapon: "bow", desc: "弓箭伤害 +15%", max: 6, has: g => g.player.damagePick >= 6, apply: g => { g.player.damagePick = (g.player.damagePick || 0) + 1; g.player.damage += Math.max(2, Math.round(g.player.damage * 0.15)); } },
+  { id: "rate", name: "疾射", icon: "速", rarity: "rare", faction: "shot", desc: "攻击频率 +12%", max: 6, has: g => g.player.ratePick >= 6, apply: g => { g.player.ratePick = (g.player.ratePick || 0) + 1; g.player.fireRate = Math.min(6, g.player.fireRate * 1.12); } },
   { id: "multi", name: "多重箭", icon: "箭", rarity: "epic", faction: "shot", weapon: "bow", desc: "箭矢数量 +1（最多 3 支，多箭伤害递减）", max: 3, has: g => g.player.arrowCount >= 3, apply: g => { g.player.arrowCount = Math.min(3, g.player.arrowCount + 1); } },
   { id: "pierce", name: "穿透", icon: "穿", rarity: "epic", faction: "shot", desc: "攻击穿透 +1（贯穿伤害递减 25%）", max: 3, has: g => g.player.pierce >= 3, apply: g => { g.player.pierce = Math.min(3, g.player.pierce + 1); } },
   { id: "crit", name: "会心", icon: "暴", rarity: "rare", faction: "shot", desc: "暴击率 +12%（2 倍伤害）", max: 0.6, has: g => g.player.crit >= 0.6, apply: g => { g.player.crit = Math.min(0.6, g.player.crit + 0.12); } },
@@ -2272,11 +2278,11 @@ const UPGRADES = [
   { id: "fly", name: "骑剑加速", icon: "骑", rarity: "rare", faction: "summon", desc: "御剑飞行速度 +12%", max: 0.6, has: g => g.player.swords.length === 0 || (g.player.flyBonus || 0) >= 0.6, apply: g => { g.player.flyBonus = Math.min(0.6, (g.player.flyBonus || 0) + 0.12); } },
   { id: "spirit", name: "剑灵", icon: "灵", rarity: "legendary", faction: "summon", desc: "御剑伤害翻倍，索敌范围 +50%", max: 1, has: g => g.player.swords.length === 0 || g.player.spirit, apply: g => { g.player.spirit = true; } },
   // ── 生存系 ──
-  { id: "hp", name: "生命", icon: "命", rarity: "common", faction: "surv", desc: "生命值 +30", max: 200, has: g => g.player.maxHp >= 200, apply: g => { g.player.maxHp = Math.min(200, g.player.maxHp + 30); g.player.hp = Math.min(g.player.maxHp, g.player.hp + 30); } },
+  { id: "hp", name: "生命", icon: "命", rarity: "common", faction: "surv", desc: "生命值 +30", max: 260, has: g => g.player.maxHp >= 260, apply: g => { g.player.maxHp = Math.min(260, g.player.maxHp + 30); g.player.hp = Math.min(g.player.maxHp, g.player.hp + 30); } },
   { id: "speed", name: "横移", icon: "移", rarity: "common", faction: "surv", desc: "横移速度 +12%", max: 700, has: g => g.player.moveSpeed >= 700, apply: g => { g.player.moveSpeed = Math.min(700, g.player.moveSpeed * 1.12); } },
   { id: "range", name: "远射", icon: "射", rarity: "common", faction: "surv", desc: "攻击距离 +12%", max: 1500, has: g => g.player.range >= 1500, apply: g => { g.player.range = Math.min(1500, g.player.range * 1.12); } },
   { id: "regen", name: "再生", icon: "愈", rarity: "rare", faction: "surv", desc: "每秒回复 2 生命", max: 1, has: g => g.player.regen > 0, apply: g => { g.player.regen = (g.player.regen || 0) + 2; } },
-  { id: "shield", name: "护盾", icon: "盾", rarity: "epic", faction: "surv", desc: "获得护盾，抵挡一次伤害", max: 3, has: g => g.player.shield >= 3, apply: g => { g.player.shield = (g.player.shield || 0) + 1; } },
+  { id: "shield", name: "护盾", icon: "盾", rarity: "epic", faction: "surv", desc: "获得护盾，抵挡一次伤害", max: 3, has: g => g.player.shieldPick >= 3, apply: g => { g.player.shieldPick = (g.player.shieldPick || 0) + 1; g.player.shield = (g.player.shield || 0) + 1; } },
   // ── 机制型（弓箭传说式）──
   { id: "lifesteal", name: "吸血", icon: "吸", rarity: "epic", faction: "shot", desc: "命中 35% 概率回复 1.5 生命", max: 2, has: g => g.player.lifesteal >= 2, apply: g => { g.player.lifesteal = (g.player.lifesteal || 0) + 1.5; } },
   { id: "orb", name: "环绕火球", icon: "环", rarity: "legendary", faction: "elem", desc: "火球环绕，触碰敌人灼烧", max: 1, has: g => g.player.orb > 0, apply: g => { g.player.orb = (g.player.orb || 0) + 1; } },
@@ -2299,8 +2305,8 @@ const UPGRADES = [
 // 流派觉醒：连选 3 个同系技能触发
 const FACTION_AWAKEN = {
   shot: { name: "风暴连射", desc: "射速 +20%，攻击 +1", apply: g => { g.player.fireRate = Math.min(6, g.player.fireRate * 1.2); g.player.arrowCount = Math.min(5, g.player.arrowCount + 1); } },
-  elem: { name: "元素湮灭", desc: "元素效果 +50%（灼烧 12/秒）", apply: g => { g.player.elemBoost = 1.5; } },
-  summon: { name: "万剑归宗", desc: "御剑伤害 +50%，索敌 +25%", apply: g => { g.player.summonBoost = 1.5; } },
+  elem: { name: "元素湮灭", desc: "元素效果 +50%（灼烧 12/秒）", apply: g => { g.player.elemBoost = Math.min(3, (g.player.elemBoost || 1) * 1.5); } },
+  summon: { name: "万剑归宗", desc: "御剑伤害 +50%，索敌 +25%", apply: g => { g.player.summonBoost = Math.min(2.5, (g.player.summonBoost || 1) * 1.5); } },
   surv: { name: "不灭之体", desc: "回复 50% 生命，上限 +40", apply: g => { g.player.maxHp = Math.min(240, g.player.maxHp + 40); g.player.hp = Math.min(g.player.maxHp, g.player.hp + g.player.maxHp * 0.5); } }
 };
 
@@ -2784,6 +2790,7 @@ class Game {
       staveMana: p.staveMana || 0, stavePierce: p.stavePierce || 0, staveDrain: p.staveDrain || 0,
       elemBoost: p.elemBoost || 1, swift: p.swift || 0, thorns: p.thorns || 0,
       pickedUpgrades: p.pickedUpgrades || [],
+      damagePick: p.damagePick || 0, ratePick: p.ratePick || 0, shieldPick: p.shieldPick || 0,
       factionCount: this.factionCount, factionAwakened: this.factionAwakened
     };
     try { localStorage.setItem("arrowStormRunSave", JSON.stringify(snap)); } catch (e) { return false; }
@@ -2824,6 +2831,7 @@ class Game {
     p.staveMana = a.staveMana || 0; p.stavePierce = a.stavePierce || 0; p.staveDrain = a.staveDrain || 0;
     p.elemBoost = a.elemBoost || 1; p.swift = a.swift || 0; p.thorns = a.thorns || 0;
     p.pickedUpgrades = a.pickedUpgrades || [];
+    p.damagePick = a.damagePick || 0; p.ratePick = a.ratePick || 0; p.shieldPick = a.shieldPick || 0;
     this.runGold = a.runGold || 0;
     this.kills = a.kills || 0;
     this.factionCount = a.factionCount || {};
@@ -4929,7 +4937,7 @@ function drawMenu(g, state) {
   g.shadowBlur = 6 + 6 * pulse;
   g.fillStyle = "#d4c6af";
   g.font = "20px Microsoft YaHei, sans-serif";
-  g.fillText("v3.52 · 房间闯关 · 排行榜 · 每日挑战", CONFIG.W / 2, 292);
+  g.fillText("v3.53 · 房间闯关 · 排行榜 · 每日挑战", CONFIG.W / 2, 292);
   g.fillStyle = "#ffe59a";
   g.font = "bold 18px Microsoft YaHei, sans-serif";
   g.fillText(Leaderboard.champion || "暂无王者", CONFIG.W / 2, 326);
