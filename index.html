@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-  <title>箭雨 v3.51</title>
+  <title>箭雨 v3.52</title>
   <style>
     html, body {
       margin: 0;
@@ -50,8 +50,8 @@
   </style>
 </head>
 <body>
-  <canvas id="game" width="540" height="960" aria-label="箭雨 v3.51 游戏画布"></canvas>
-  <div id="landscapeBlocker">请旋转设备为竖屏<br>箭雨 v3.51 仅支持竖屏飞行</div>
+  <canvas id="game" width="540" height="960" aria-label="箭雨 v3.52 游戏画布"></canvas>
+  <div id="landscapeBlocker">请旋转设备为竖屏<br>箭雨 v3.52 仅支持竖屏飞行</div>
 <script>
 "use strict";
 
@@ -428,6 +428,52 @@ const ROOM_LABEL = {
   elite: "精英房",
   boss: "BOSS房"
 };
+// ── 局内装备系统（v3.52）：打怪掉落、本局穿戴、死亡消失 ──
+const GEAR_SLOTS = ["helm", "armor", "boots", "trinket"];
+const GEAR_SLOT_NAMES = { helm: "头盔", armor: "护甲", boots: "靴子", trinket: "饰品" };
+const GEAR_SLOT_ICONS = { helm: "⛑", armor: "🛡", boots: "👢", trinket: "💍" };
+const GEAR_QUALITY = [
+  { name: "普通", color: "#c8ccd4", w: 40, mult: 1, stats: [1, 1] },
+  { name: "优秀", color: "#6fd98a", w: 30, mult: 1.3, stats: [1, 2] },
+  { name: "稀有", color: "#5fb6ff", w: 18, mult: 1.6, stats: [2, 2] },
+  { name: "史诗", color: "#c77dff", w: 9, mult: 2, stats: [2, 3] },
+  { name: "传说", color: "#ffc95e", w: 3, mult: 2.5, stats: [3, 3] }
+];
+const GEAR_STATS = {
+  dmg:   { name: "攻击", base: 0.05, fmt: v => `攻击 +${Math.round(v * 100)}%` },
+  hp:    { name: "生命", base: 10, fmt: v => `生命 +${Math.round(v)}` },
+  crit:  { name: "暴击", base: 0.03, fmt: v => `暴击 +${Math.round(v * 100)}%` },
+  rate:  { name: "射速", base: 0.05, fmt: v => `射速 +${Math.round(v * 100)}%` },
+  move:  { name: "移速", base: 10, fmt: v => `移速 +${Math.round(v)}` },
+  gold:  { name: "金币", base: 0.08, fmt: v => `金币 +${Math.round(v * 100)}%` },
+  exp:   { name: "经验", base: 0.08, fmt: v => `经验 +${Math.round(v * 100)}%` },
+  life:  { name: "吸血", base: 0.4, fmt: v => `吸血 +${v}` },
+  dodge: { name: "闪避", base: 0.03, fmt: v => `闪避 +${Math.round(v * 100)}%` },
+  arrow: { name: "箭数", base: 1, fmt: v => `箭数 +${v}` },
+  pierce:{ name: "穿透", base: 1, fmt: v => `穿透 +${v}` }
+};
+const GEAR_NAMES = {
+  helm: ["铁盔", "猎手帽", "王冠", "兜鍪", "羽冠"],
+  armor: ["皮甲", "锁子甲", "胸甲", "法袍", "鳞甲"],
+  boots: ["皮靴", "疾风靴", "铁靴", "行者靴", "灵靴"],
+  trinket: ["戒指", "护符", "项链", "徽章", "宝珠"]
+};
+function rollGear(chapter) {
+  const slot = Util.pick(GEAR_SLOTS);
+  // 品质权重：章节越高，史诗/传说概率提升
+  const qw = GEAR_QUALITY.map((q, i) => q.w * (i >= 3 ? 1 + (chapter - 1) * 0.25 : 1));
+  let total = qw.reduce((a, b) => a + b, 0), r = Math.random() * total, qi = 0;
+  for (let i = 0; i < qw.length; i++) { r -= qw[i]; if (r <= 0) { qi = i; break; } }
+  const q = GEAR_QUALITY[qi];
+  const nStats = Util.randi(q.stats[0], q.stats[1]);
+  const types = Util.shuffle(Object.keys(GEAR_STATS)).slice(0, nStats);
+  const stats = types.map(t => {
+    let v = Math.round(GEAR_STATS[t].base * q.mult * 100) / 100;
+    if (t === "arrow" || t === "pierce") v = Math.max(1, Math.round(v)); // 计数属性取整
+    return { t, v };
+  });
+  return { slot, quality: qi, name: Util.pick(GEAR_NAMES[slot]), stats };
+}
 const BOSS_DATA = [
   { kind: "treant", name: "树精王", title: "BOSS · 树精王", body: "#365a2c", arm: "#4e7a35", eye: "#c9ff72", crown: "#89c85f" },
   { kind: "scorpion", name: "沙蝎王", title: "BOSS · 沙蝎王", body: "#8a5a24", arm: "#c27a2c", eye: "#ffe08a", crown: "#d9a441" },
@@ -461,6 +507,14 @@ const Util = {
   rand(a, b) { return a + Math.random() * (b - a); },
   randi(a, b) { return Math.floor(Util.rand(a, b + 1)); },
   pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; },
+  shuffle(arr) {
+    const a = arr.slice();
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  },
   dist2(a, b) {
     const dx = a.x - b.x;
     const dy = a.y - b.y;
@@ -758,8 +812,9 @@ class Arrow {
           e.poisonDps = 4;
         }
         // 吸血：命中概率回血（防多箭+追踪无脑站桩）
-        if (this.lifesteal > 0 && Math.random() < 0.35) {
-          game.player.hp = Math.min(game.player.maxHp, game.player.hp + this.lifesteal);
+        const lifestealTotal = this.lifesteal + ((game.player.gearStats && game.player.gearStats.lifestealFlat) || 0);
+        if (lifestealTotal > 0 && Math.random() < 0.35) {
+          game.player.hp = Math.min(game.player.maxHp, game.player.hp + lifestealTotal);
           if (Math.random() < 0.3) game.particles.get(game.player.x, game.player.y - 20, Util.rand(-10, 10), Util.rand(-40, -10), 0.4, "#ff6b81", Util.rand(2, 4));
         }
         // 乘区联动 1：分裂箭 —— 命中生成 2 支小箭（30% 伤害）
@@ -1061,6 +1116,69 @@ class Coin {
   }
 }
 
+// 装备掉落物：落地停留，靠近玩家磁吸，拾取自动穿戴
+class GearDrop {
+  constructor() { this.active = false; }
+  init(x, y, gear) {
+    this.active = true;
+    this.x = x; this.y = y;
+    this.gear = gear;
+    this.vx = Util.rand(-50, 50);
+    this.vy = Util.rand(-150, -80);
+    this.settleT = 0.5;
+    this.t = Util.rand(0, TAU);
+  }
+  update(dt, game) {
+    this.t += dt * 3;
+    if (this.settleT > 0) {
+      this.settleT -= dt;
+      this.vy += 300 * dt;
+      this.x += this.vx * dt;
+      this.y += this.vy * dt;
+      if (this.settleT <= 0) { this.vx = 0; this.vy = 0; }
+    }
+    const p = game.player;
+    const dx = p.x - this.x, dy = p.y - this.y;
+    const d = Math.hypot(dx, dy);
+    if (d < 90 && d > 1) {
+      const pull = (1 - d / 90) * 360;
+      this.x += dx / d * pull * dt;
+      this.y += dy / d * pull * dt;
+      if (d < 26) {
+        this.active = false;
+        game.equipGear(this.gear);
+        audio.upgrade();
+      }
+    }
+  }
+  render(g) {
+    const q = GEAR_QUALITY[this.gear.quality];
+    const bob = Math.sin(this.t) * 3;
+    g.save();
+    g.translate(this.x, this.y + bob);
+    // 品质光柱
+    g.fillStyle = q.color;
+    g.globalAlpha = 0.28;
+    g.fillRect(-4, 6, 8, 26);
+    g.globalAlpha = 1;
+    // 品质色圆底 + 槽位图标
+    g.shadowBlur = 14;
+    g.shadowColor = q.color;
+    g.fillStyle = "#131b14";
+    g.beginPath();
+    g.arc(0, 0, 13, 0, TAU);
+    g.fill();
+    g.strokeStyle = q.color;
+    g.lineWidth = 2.5;
+    g.stroke();
+    g.shadowBlur = 0;
+    g.textAlign = "center";
+    g.font = "bold 14px Microsoft YaHei, sans-serif";
+    g.fillText(GEAR_SLOT_ICONS[this.gear.slot], 0, 5);
+    g.restore();
+  }
+}
+
 let enemyId = 1;
 class Enemy {
   constructor() { this.active = false; }
@@ -1158,7 +1276,7 @@ class Enemy {
     // 金币掉落：收紧经济（v3.42：小兵2→1/弓手3→2/坦克5→3/精英4→3倍/Boss40→30），第1章≈75金
     const base = this.isBoss ? 30 : { minion: 1, archer: 2, tank: 3, flyer: 2 }[this.type] || 1;
     // 招财天赋：金币获取加成
-    const goldMult = (game.player.heroGoldMult || 1);
+    const goldMult = (game.player.heroGoldMult || 1) * ((game.player.gearStats && game.player.gearStats.goldMult) || 1);
     // 前 2 房（新手房）金币 ×3：保证到商店房（房3）能买至少一次最低消费（25 金）
     // 实测 ×2 只够16金不够25；×3 前2房≈25-30金刚好
     const earlyBonus = (game.roomIndex || 0) < 2 ? 3 : 1;
@@ -1174,6 +1292,11 @@ class Enemy {
     if (this.isBoss) {
       game.boss = null;
       game.spawnChest();
+    }
+    // 装备掉落（v3.52）：Boss 必掉、精英 25%、小兵 3%
+    const gearChance = this.isBoss ? 1 : this.isElite ? 0.25 : 0.03;
+    if (Math.random() < gearChance) {
+      game.gearDrops.get(this.x, this.y - 10, rollGear(game.chapter || 1));
     }
     // 分裂词缀：精英死亡分裂成 2 个小兵
     // ⚠️ 关键：分裂出的 minion 必须强制非精英——否则 Enemy.init 有 18-30% 概率
@@ -1814,6 +1937,9 @@ class Player {
     this.staveDrain = 0;     // 灵魂汲取（命中回血/级）
     this.weaponCatOverride = undefined; // 局内武器转换（undefined=用局外配置）
     this.weaponSkinOverride = undefined; // 局内武器装备（undefined=用局外免费武器）
+    // 局内装备（v3.52）：打怪掉落穿戴，死亡消失
+    this.gear = { helm: null, armor: null, boots: null, trinket: null };
+    this.gearStats = { dmgMult: 1, rateMult: 1, critFlat: 0, hpFlat: 0, moveFlat: 0, goldMult: 1, expMult: 1, lifestealFlat: 0, dodgeFlat: 0, arrowFlat: 0, pierceFlat: 0 };
     this.swords = [];
     this.inv = 0;
     this.pickedUpgrades = [];
@@ -1826,8 +1952,9 @@ class Player {
   canBeHit() { return this.inv <= 0; }
   hurt(dmg, game, kx, ky) {
     if (!this.canBeHit()) return;
-    // 闪避：概率完全躲开（闪避天赋）
-    if (this.dodge > 0 && Math.random() < this.dodge) {
+    // 闪避：概率完全躲开（闪避天赋 + 装备闪避）
+    const dodgeTotal = this.dodge + ((this.gearStats && this.gearStats.dodgeFlat) || 0);
+    if (dodgeTotal > 0 && Math.random() < dodgeTotal) {
       for (let i = 0; i < 6; i++) game.particles.get(this.x, this.y, Util.rand(-30, 30), Util.rand(-40, 20), 0.4, "#8affc1", Util.rand(2, 4));
       return;
     }
@@ -1920,7 +2047,8 @@ class Player {
     if (this.regen > 0) this.hp = Math.min(this.maxHp, this.hp + this.regen * dt);
     this.fireT -= dt;
     if (this.fireT <= 0) {
-      this.fireT += 1 / this.fireRate;
+      const gs = this.gearStats || {};
+      this.fireT += 1 / (this.fireRate * (gs.rateMult || 1));
       game.fireArrows();
     }
     for (const sword of this.swords) sword.update(dt, game);
@@ -2284,7 +2412,7 @@ function heroExpNeed(level) {
 }
 // 结算经验：击杀+关卡推进
 function gainHeroExp(game, kills, chapter, roomIndex) {
-  const base = kills * 4 + (chapter - 1) * 60 + roomIndex * 10;
+  const base = Math.round((kills * 4 + (chapter - 1) * 60 + roomIndex * 10) * ((game.player && game.player.gearStats && game.player.gearStats.expMult) || 1));
   SaveSystem.data.heroExp += base;
   let leveled = 0;
   while (SaveSystem.data.heroExp >= heroExpNeed(SaveSystem.data.heroLevel)) {
@@ -2462,6 +2590,7 @@ class Game {
     this.enemies = new Pool(Enemy);
     this.bullets = new Pool(Bullet);
     this.coins = new Pool(Coin);
+    this.gearDrops = new Pool(GearDrop);
     this.zones = new Pool(Zone);
     this.particles = new Pool(Particle);
     this.input = { left: 0, right: 0, up: 0, down: 0, touching: false, touchX: CONFIG.W / 2, touchY: CONFIG.PLAYER_Y, hover: false, hoverX: CONFIG.W / 2, hoverY: CONFIG.PLAYER_Y };
@@ -2548,6 +2677,7 @@ class Game {
     this.enemies.items.length = 0;
     this.bullets.items.length = 0;
     this.coins.items.length = 0;
+    this.gearDrops.items.length = 0;
     this.zones.items.length = 0;
     this.particles.items.length = 0;
     this.resetWorld();
@@ -2743,6 +2873,7 @@ class Game {
     for (const b of this.bullets.active()) b.update(dt, this);
     for (const z of this.zones.active()) z.update(dt, this);
     for (const c of this.coins.active()) c.update(dt, this);
+    for (const gd of this.gearDrops.active()) gd.update(dt, this);
     for (const p of this.particles.active()) p.update(dt);
     this.updateGate(dt);
     this.updateChest(dt);
@@ -2807,6 +2938,7 @@ class Game {
     this.bullets.items.length = 0;
     this.enemies.items.length = 0;
     this.coins.items.length = 0;
+    this.gearDrops.items.length = 0;
     this.player.x = CONFIG.W / 2;
     this.player.y = CONFIG.PLAYER_Y;
     checkThemeSwitch(this);
@@ -3033,6 +3165,36 @@ class Game {
     // 提示玩家吃宝箱（否则 Boss 房不出传送门会以为卡住）
     this.flashMessage("拾取宝箱开启传送门！");
   }
+  // 装备穿戴：同槽位替换（先撤销旧的再加新的），属性实时生效
+  equipGear(gear) {
+    const p = this.player;
+    const old = p.gear[gear.slot];
+    if (old) this.applyGearStats(old, -1);
+    p.gear[gear.slot] = gear;
+    this.applyGearStats(gear, 1);
+    const q = GEAR_QUALITY[gear.quality];
+    const desc = gear.stats.map(s => GEAR_STATS[s.t].fmt(s.v)).join(" ");
+    this.flashMessage(`${q.name}·${GEAR_SLOT_NAMES[gear.slot]}「${gear.name}」已穿戴 ${desc}${old ? "（替换旧装备）" : ""}`);
+    for (let i = 0; i < 22; i++) this.particles.get(p.x, p.y - 20, Util.rand(-90, 90), Util.rand(-120, 30), 0.6, q.color, Util.rand(3, 7));
+  }
+  applyGearStats(gear, sign) {
+    const p = this.player, gs = p.gearStats;
+    for (const s of gear.stats) {
+      switch (s.t) {
+        case "dmg": gs.dmgMult *= Math.pow(1 + s.v, sign); break;
+        case "hp": p.maxHp = Math.max(20, p.maxHp + s.v * sign); p.hp = Math.min(p.maxHp, Math.max(1, p.hp + s.v * sign)); break;
+        case "crit": gs.critFlat = Math.max(0, gs.critFlat + s.v * sign); break;
+        case "rate": gs.rateMult *= Math.pow(1 + s.v, sign); break;
+        case "move": p.moveSpeed = Math.max(60, p.moveSpeed + s.v * sign); break;
+        case "gold": gs.goldMult *= Math.pow(1 + s.v, sign); break;
+        case "exp": gs.expMult *= Math.pow(1 + s.v, sign); break;
+        case "life": gs.lifestealFlat = Math.max(0, gs.lifestealFlat + s.v * sign); break;
+        case "dodge": gs.dodgeFlat = Math.max(0, gs.dodgeFlat + s.v * sign); break;
+        case "arrow": gs.arrowFlat = Math.max(0, gs.arrowFlat + s.v * sign); break;
+        case "pierce": gs.pierceFlat = Math.max(0, gs.pierceFlat + s.v * sign); break;
+      }
+    }
+  }
   updateChest(dt) {
     if (!this.chest) return;
     this.chest.pulse += dt;
@@ -3064,11 +3226,14 @@ class Game {
       }
       audio.chest();
       for (let i = 0; i < 35; i++) this.particles.get(this.chest.x, this.chest.y, Util.rand(-150, 150), Util.rand(-190, 40), 0.9, "#f7c948", Util.rand(4, 10));
+      // 宝箱 30% 额外掉装备
+      if (Math.random() < 0.3) this.gearDrops.get(this.chest.x, this.chest.y - 10, rollGear(this.chapter || 1));
       this.chest = null;
     } else if (this.chest.y > CONFIG.H + 80) this.chest = null;
   }
   fireArrows() {
-    const n = this.player.arrowCount;
+    const gs = this.player.gearStats || { dmgMult: 1, rateMult: 1, critFlat: 0, pierceFlat: 0, arrowFlat: 0 };
+    const n = Math.min(8, this.player.arrowCount + (gs.arrowFlat || 0));
     // 狂暴：低血加伤（血低于 40% 时 +30%/级）
     let berserkMult = 1;
     if (this.player.berserk > 0 && this.player.hp / this.player.maxHp < 0.4) {
@@ -3094,10 +3259,10 @@ class Game {
       // 法杖模式：能量球（高伤自带元素，穿透+1，弹速略慢）
       const isStave = isStaveMode();
       const st = isStave ? getWeaponStave() : null;
-      const baseDmg = this.player.damage * dmgMul * berserkMult;
+      const baseDmg = this.player.damage * dmgMul * berserkMult * (gs.dmgMult || 1);
       const a = isStave
-        ? this.arrows.get(this.player.x, this.player.y - 36, targetAngle + t, baseDmg, this.player.range, this.player.pierce, this.player.crit, this.player.fire || st.bonus.elem === "fire", this.player.ice || st.bonus.elem === "ice")
-        : this.arrows.get(this.player.x, this.player.y - 36, targetAngle + t, baseDmg, this.player.range, this.player.pierce, this.player.crit, this.player.fire, this.player.ice);
+        ? this.arrows.get(this.player.x, this.player.y - 36, targetAngle + t, baseDmg, this.player.range, this.player.pierce + (gs.pierceFlat || 0), Math.min(1, this.player.crit + (gs.critFlat || 0)), this.player.fire || st.bonus.elem === "fire", this.player.ice || st.bonus.elem === "ice")
+        : this.arrows.get(this.player.x, this.player.y - 36, targetAngle + t, baseDmg, this.player.range, this.player.pierce + (gs.pierceFlat || 0), Math.min(1, this.player.crit + (gs.critFlat || 0)), this.player.fire, this.player.ice);
       a.isStave = isStave;
       if (isStave) {
         a.vx *= 0.85; a.vy *= 0.85; // 能量球略慢
@@ -3158,6 +3323,7 @@ class Game {
     for (const a of this.arrows.active()) a.render(g);
     for (const b of this.bullets.active()) b.render(g);
     for (const c of this.coins.active()) c.render(g);
+    for (const gd of this.gearDrops.active()) gd.render(g);
     for (const z of this.zones.active()) z.render(g);
     this.player.render(g);
     // 升级光圈（画在粒子下层）
@@ -4327,6 +4493,19 @@ function drawStatsPanel(g, state) {
   g.fillStyle = "#9aa5b4";
   g.font = "14px Microsoft YaHei, sans-serif";
   g.fillText("特殊机制：" + (mechs.length ? mechs.join("  ") : "无"), 60, 306);
+  // 已穿装备摘要（v3.52 局内装备）
+  const gearParts = [];
+  for (const s of GEAR_SLOTS) {
+    const gear = p.gear[s];
+    if (gear) {
+      const q = GEAR_QUALITY[gear.quality];
+      gearParts.push(`${GEAR_SLOT_ICONS[s]}${q.name}·${gear.name}`);
+    }
+  }
+  g.textAlign = "left";
+  g.fillStyle = "#9aa5b4";
+  g.font = "14px Microsoft YaHei, sans-serif";
+  g.fillText("装备：" + (gearParts.length ? gearParts.join("  ") : "无（打怪掉落，本局有效）"), 60, 328);
   // 已选技能卡
   g.textAlign = "center";
   g.fillStyle = "#e8eef6";
@@ -4593,7 +4772,25 @@ function drawHud(g, state) {
   }
   g.font = "15px Microsoft YaHei, sans-serif";
   g.fillText(`房间 ${state.roomIndex + 1}/6 · ${ROOM_LABEL[state.roomType]}`, 434, 66);
+  // 装备槽状态：4 个品质色小点（v3.52 局内装备）
+  const gearArr = GEAR_SLOTS.map(s => state.player.gear[s]);
+  const gearCount = gearArr.filter(Boolean).length;
   g.fillText(`击杀 ${state.kills}  御剑 ${state.player.swords.length}/3${state.player.shield > 0 ? `  盾${state.player.shield}` : ""}`, 434, 90);
+  let gx = 434;
+  g.font = "12px Microsoft YaHei, sans-serif";
+  g.textAlign = "left";
+  for (let i = 0; i < GEAR_SLOTS.length; i++) {
+    const gear = gearArr[i];
+    g.fillStyle = gear ? GEAR_QUALITY[gear.quality].color : "rgba(255,255,255,0.25)";
+    g.beginPath();
+    g.arc(gx, 104, 4.5, 0, TAU);
+    g.fill();
+    gx += 13;
+  }
+  if (gearCount > 0) {
+    g.fillStyle = "#ffd56a";
+    g.fillText(`装${gearCount}/4`, gx + 2, 108);
+  }
   g.fillStyle = "#f7c948";
   g.fillText(`💰${state.runGold || 0}`, 96, 108);
   // 常驻基础数值条（左下角，紧凑不挡战斗视线）
@@ -4732,7 +4929,7 @@ function drawMenu(g, state) {
   g.shadowBlur = 6 + 6 * pulse;
   g.fillStyle = "#d4c6af";
   g.font = "20px Microsoft YaHei, sans-serif";
-  g.fillText("v3.51 · 房间闯关 · 排行榜 · 每日挑战", CONFIG.W / 2, 292);
+  g.fillText("v3.52 · 房间闯关 · 排行榜 · 每日挑战", CONFIG.W / 2, 292);
   g.fillStyle = "#ffe59a";
   g.font = "bold 18px Microsoft YaHei, sans-serif";
   g.fillText(Leaderboard.champion || "暂无王者", CONFIG.W / 2, 326);
