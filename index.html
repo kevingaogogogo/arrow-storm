@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-  <title>箭雨 v3.50</title>
+  <title>箭雨 v3.51</title>
   <style>
     html, body {
       margin: 0;
@@ -50,8 +50,8 @@
   </style>
 </head>
 <body>
-  <canvas id="game" width="540" height="960" aria-label="箭雨 v3.50 游戏画布"></canvas>
-  <div id="landscapeBlocker">请旋转设备为竖屏<br>箭雨 v3.50 仅支持竖屏飞行</div>
+  <canvas id="game" width="540" height="960" aria-label="箭雨 v3.51 游戏画布"></canvas>
+  <div id="landscapeBlocker">请旋转设备为竖屏<br>箭雨 v3.51 仅支持竖屏飞行</div>
 <script>
 "use strict";
 
@@ -94,7 +94,7 @@ const CONFIG = {
 };
 
 const TAU = Math.PI * 2;
-const LEADERBOARD_ID = "019fc5b1-da1d-77b0-80c7-697b169f0d1c";
+const LEADERBOARD_ID = "019fd14a-b8cd-7e85-921b-69637ce51027";
 const LEADERBOARD_CACHE_MS = 5 * 60 * 1000;
 // 排行榜镜像（GitHub Pages 静态文件，国内稳定读取；jsonblob 负责写入）
 const LEADERBOARD_MIRROR = "https://kevingaogogogo.github.io/arrow-storm/leaderboard.json";
@@ -223,23 +223,33 @@ const Leaderboard = {
   async load(options = {}) {
     const silent = !!options.silent;
     if (!silent) this.status = "loading";
+    // 先读 GitHub 镜像：①广播 blobId（jsonblob 迁移/重建后的新 ID 通过镜像传达给所有玩家，防分叉）
+    // ②作为 jsonblob 404 时的灾备数据（部署时同步的最新快照）
+    let mirrorData = null;
+    try {
+      const mres = await fetch(LEADERBOARD_MIRROR, { cache: "no-store" });
+      if (mres.ok) mirrorData = await mres.json();
+    } catch (_) {}
+    if (mirrorData && mirrorData.meta && mirrorData.meta.blobId) {
+      this.id = mirrorData.meta.blobId; // 采用镜像广播的权威 blob
+    }
     // 尝试顺序：jsonblob（实时权威）→ GitHub 镜像（jsonblob 挂了时的降级快照）→ localStorage 缓存（离线兜底）
-    // 注意：mirror 是部署时静态快照，若优先会掩盖 jsonblob 的新数据
     const attempts = [
       async () => {
         let id = this.id;
         let res = await this.request("GET", id);
         if (res.status === 404) {
-          id = await this.createBlob({ version: 1, players: [] });
+          // blob 过期被删：用镜像快照重建（数据续命），镜像为空才建空 blob——绝不能直接建空丢数据
+          const backup = mirrorData ? this.normalize(mirrorData) : { version: 1, players: [] };
+          id = await this.createBlob(backup);
           res = await this.request("GET", id);
         }
         if (!res.ok) throw new Error("jsonblob failed");
         return this.normalize(await res.json());
       },
       async () => {
-        const res = await fetch(LEADERBOARD_MIRROR, { cache: "no-store" });
-        if (!res.ok) throw new Error("mirror failed");
-        return this.normalize(await res.json());
+        if (!mirrorData) throw new Error("mirror failed");
+        return this.normalize(mirrorData);
       },
       async () => {
         const raw = localStorage.getItem(LEADERBOARD_LOCAL_KEY);
@@ -4722,7 +4732,7 @@ function drawMenu(g, state) {
   g.shadowBlur = 6 + 6 * pulse;
   g.fillStyle = "#d4c6af";
   g.font = "20px Microsoft YaHei, sans-serif";
-  g.fillText("v3.50 · 房间闯关 · 排行榜 · 每日挑战", CONFIG.W / 2, 292);
+  g.fillText("v3.51 · 房间闯关 · 排行榜 · 每日挑战", CONFIG.W / 2, 292);
   g.fillStyle = "#ffe59a";
   g.font = "bold 18px Microsoft YaHei, sans-serif";
   g.fillText(Leaderboard.champion || "暂无王者", CONFIG.W / 2, 326);
