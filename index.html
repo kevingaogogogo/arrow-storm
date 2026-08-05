@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-  <title>箭雨 v3.55</title>
+  <title>箭雨 v3.56</title>
   <style>
     html, body {
       margin: 0;
@@ -50,8 +50,8 @@
   </style>
 </head>
 <body>
-  <canvas id="game" width="540" height="960" aria-label="箭雨 v3.55 游戏画布"></canvas>
-  <div id="landscapeBlocker">请旋转设备为竖屏<br>箭雨 v3.55 仅支持竖屏飞行</div>
+  <canvas id="game" width="540" height="960" aria-label="箭雨 v3.56 游戏画布"></canvas>
+  <div id="landscapeBlocker">请旋转设备为竖屏<br>箭雨 v3.56 仅支持竖屏飞行</div>
 <script>
 "use strict";
 
@@ -824,31 +824,18 @@ class Arrow {
   }
   update(dt, game) {
     this.lastX = this.x; this.lastY = this.y;
-    // 追踪箭：持续朝最近敌人转向（拐弯追人）
-    // v3.48: 多箭按序号锁定不同目标（第1支追最近、第2支追次近…），弹道分离不重叠
+    // 追踪箭：持续朝目标转向（拐弯追人）
+    // v3.56: 重写索敌——收集有效敌人按距离排序，第 N 支箭锁第 N 近；敌人少于箭数时循环分配（原逻辑敌人少时部分箭不追踪）
     if (this.homing) {
-      let best = null, bestD = 999999, bestI = -1;
-      const wantIdx = this.arrowIdx % 3;
-      let cnt = -1;
+      const targets = [];
       for (const e of game.enemies.active()) {
         if (e.dead || this.hitIds.has(e.id)) continue;
-        const d = Util.dist2(this, e);
-        if (d < bestD) { best = e; bestD = d; bestI = ++cnt; }
+        targets.push(e);
       }
-      // 让第 N 支箭锁定第 N 近的敌人（多目标分离；只有一个目标时仍全部追它）
-      if (best && bestI >= wantIdx) {
-        let target = best, targetD = bestD;
-        if (bestI > wantIdx) {
-          let nearer = 0;
-          for (const e of game.enemies.active()) {
-            if (e.dead || this.hitIds.has(e.id)) continue;
-            const d = Util.dist2(this, e);
-            if (d < targetD) {
-              if (nearer === wantIdx) { target = e; targetD = d; break; }
-              nearer++;
-            }
-          }
-        }
+      if (targets.length) {
+        targets.sort((a, b) => Util.dist2(this, a) - Util.dist2(this, b));
+        const wantIdx = this.arrowIdx % targets.length;
+        const target = targets[wantIdx];
         const wantAngle = Math.atan2(target.x - this.x, -(target.y - this.y));
         // 当前朝向角
         let curAngle = Math.atan2(this.vx, -this.vy);
@@ -1540,15 +1527,21 @@ class Enemy {
     // 精英专属技能：swift 疾冲 / armored 震地 / splitter 自爆分裂加速
     if (this.isElite && !this.isBoss) {
       if (this.eliteAffix === "swift") {
-        // 疾冲：周期性爆发冲刺（v3.48: 削弱——之前2.6s一次130px瞬移粘人甩不掉）
+        // 疾冲：周期性冲刺（v3.56: 原瞬间位移 100px 造成"瞬移"视觉——改为 0.35s 平滑冲刺 300px/s）
         this.dashT = (this.dashT || 0) - dt;
         if (this.dashT <= 0) {
           this.dashT = 3.2;
+          this.dashRemain = 0.35;
           const dx2 = game.player.x - this.x, dy2 = game.player.y - this.y;
           const d2 = Math.max(1, Math.hypot(dx2, dy2));
-          this.x += dx2 / d2 * 100;
-          this.y += dy2 / d2 * 100;
+          this.dashVX = dx2 / d2 * 300;
+          this.dashVY = dy2 / d2 * 300;
           for (let i = 0; i < 8; i++) game.particles.get(this.x, this.y, Util.rand(-40, 40), Util.rand(-40, 40), 0.4, "#ffd56a", Util.rand(2, 5));
+        }
+        if ((this.dashRemain || 0) > 0) {
+          this.dashRemain -= dt;
+          this.x += (this.dashVX || 0) * dt;
+          this.y += (this.dashVY || 0) * dt;
         }
       } else if (this.eliteAffix === "armored") {
         // 震地：近身时 AOE 弹幕
@@ -1574,6 +1567,11 @@ class Enemy {
       }
     }
     if (this.isBoss) this.updateBoss(dt, game, slow);
+    // v3.56: 怪物边界约束——防走出地图（原来无 clamp，怪可飘出屏幕）
+    if (!this.isBoss) {
+      this.x = Util.clamp(this.x, 42, CONFIG.W - 42);
+      this.y = Util.clamp(this.y, 130, CONFIG.H - 30);
+    }
     if (this.y > CONFIG.H + this.r + 80) this.active = false;
     if (!this.dead && game.player.canBeHit() && Util.circleHit(this, game.player)) {
       // 碰撞伤害随章节成长（v3.48: 前期温和 13+ch×2，第1章15 可挨3下）
@@ -2827,6 +2825,16 @@ class Game {
     SaveSystem.save();
     audio.upgrade();
     return true;
+  }
+  // 重置天赋（v3.56）：清零全部已加点数，返还天赋点重新分配
+  resetHeroTree() {
+    const spent = Object.values(SaveSystem.data.heroTree || {}).reduce((a, b) => a + (b || 0), 0);
+    SaveSystem.data.heroTree = { dmg: 0, rate: 0, hp: 0, crit: 0, gold: 0, luck: 0 };
+    SaveSystem.data.heroPoints = (SaveSystem.data.heroPoints || 0) + spent;
+    SaveSystem.save();
+    this.heroResetArmed = false;
+    audio.upgrade();
+    this.flashMessage(`天赋已重置，返还 ${spent} 点`);
   }
   gameOver() {
     if (this.state !== "PLAY") return;
@@ -4860,6 +4868,16 @@ function drawHeroTree(g, state) {
   g.fillStyle = "#e8eef6";
   g.font = "bold 18px Microsoft YaHei, sans-serif";
   g.fillText("返回", 270, 912);
+  // 重置天赋按钮（v3.56：清零重新加点，两段式确认防误触）
+  const armed = !!state.heroResetArmed;
+  g.fillStyle = armed ? "rgba(255,90,70,0.35)" : "rgba(255,90,70,0.18)";
+  roundRect(g, 348, 882, 120, 44, 10); g.fill();
+  g.strokeStyle = "rgba(255,110,90,0.7)";
+  g.lineWidth = 1.5;
+  roundRect(g, 348, 882, 120, 44, 10); g.stroke();
+  g.fillStyle = armed ? "#ffb3a6" : "#ff8a70";
+  g.font = "bold 16px Microsoft YaHei, sans-serif";
+  g.fillText(armed ? "确认重置？" : "重置天赋", 408, 912);
   g.restore();
 }
 
@@ -5035,8 +5053,7 @@ function drawHud(g, state) {
     g.fillStyle = "#ffd56a";
     g.fillText(`装${gearCount}/4`, gx + 2, 108);
   }
-  g.fillStyle = "#f7c948";
-  g.fillText(`💰${state.runGold || 0}`, 96, 108);
+  // v3.56: 左上角金币已移除（与 Boss 血条 92-448/86-110 重叠被遮挡）——金币显示在右下角商店区
   // 常驻基础数值条（左下角，紧凑不挡战斗视线）
   const p = state.player;
   g.fillStyle = "rgba(13,20,14,0.55)";
@@ -5083,6 +5100,16 @@ function drawHud(g, state) {
   g.fillStyle = "#d8b26a";
   g.fillText(`${state.runGold || 0}💰`, CONFIG.W - 53, CONFIG.H - 26);
   g.textAlign = "right";
+  // 金币横条（v3.56）：商店按钮正上方，醒目大号——原左上角金币被 Boss 血条遮挡
+  g.fillStyle = "rgba(247,201,72,0.14)";
+  roundRect(g, CONFIG.W - 170, CONFIG.H - 94, 156, 26, 8); g.fill();
+  g.strokeStyle = "rgba(247,201,72,0.55)";
+  g.lineWidth = 1.5;
+  roundRect(g, CONFIG.W - 170, CONFIG.H - 94, 156, 26, 8); g.stroke();
+  g.textAlign = "center";
+  g.fillStyle = "#ffd56a";
+  g.font = "bold 16px Microsoft YaHei, sans-serif";
+  g.fillText(`💰 ${state.runGold || 0}`, CONFIG.W - 92, CONFIG.H - 76);
   if (state.boss && state.boss.active) {
     const p = Util.clamp(state.boss.hp / state.boss.maxHp, 0, 1);
     g.fillStyle = "rgba(0,0,0,0.55)";
@@ -5220,7 +5247,7 @@ function drawMenu(g, state) {
   g.shadowBlur = 6 + 6 * pulse;
   g.fillStyle = "#d4c6af";
   g.font = "20px Microsoft YaHei, sans-serif";
-  g.fillText("v3.55 · 房间闯关 · 排行榜 · 每日挑战", CONFIG.W / 2, 292);
+  g.fillText("v3.56 · 房间闯关 · 排行榜 · 每日挑战", CONFIG.W / 2, 292);
   g.fillStyle = "#ffe59a";
   g.font = "bold 18px Microsoft YaHei, sans-serif";
   g.fillText(Leaderboard.champion || "暂无王者", CONFIG.W / 2, 326);
@@ -5659,7 +5686,13 @@ function activateAt(x, y) {
     });
   } else if (game.state === "HERO") {
     // 返回
-    if (x >= 210 && x <= 330 && y >= 882 && y <= 926) { game.closeHeroTree(); return; }
+    if (x >= 210 && x <= 330 && y >= 882 && y <= 926) { game.heroResetArmed = false; game.closeHeroTree(); return; }
+    // 重置天赋（v3.56：两段式确认）
+    if (x >= 348 && x <= 468 && y >= 882 && y <= 926) {
+      if (game.heroResetArmed) game.resetHeroTree();
+      else game.heroResetArmed = true;
+      return;
+    }
     // 加点（6 卡 3x2 网格）
     HERO_TALENTS.forEach((t, i) => {
       const col = i % 3;
