@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-  <title>箭雨 v3.54</title>
+  <title>箭雨 v3.55</title>
   <style>
     html, body {
       margin: 0;
@@ -50,8 +50,8 @@
   </style>
 </head>
 <body>
-  <canvas id="game" width="540" height="960" aria-label="箭雨 v3.54 游戏画布"></canvas>
-  <div id="landscapeBlocker">请旋转设备为竖屏<br>箭雨 v3.54 仅支持竖屏飞行</div>
+  <canvas id="game" width="540" height="960" aria-label="箭雨 v3.55 游戏画布"></canvas>
+  <div id="landscapeBlocker">请旋转设备为竖屏<br>箭雨 v3.55 仅支持竖屏飞行</div>
 <script>
 "use strict";
 
@@ -450,7 +450,11 @@ const GEAR_STATS = {
   life:  { name: "吸血", base: 0.4, fmt: v => `吸血 +${v}` },
   dodge: { name: "闪避", base: 0.03, fmt: v => `闪避 +${Math.round(v * 100)}%` },
   arrow: { name: "箭数", base: 1, fmt: v => `箭数 +${v}` },
-  pierce:{ name: "穿透", base: 1, fmt: v => `穿透 +${v}` }
+  pierce:{ name: "穿透", base: 1, fmt: v => `穿透 +${v}` },
+  // 元素抗性（v3.55 怪物属性攻击对应防御）：减免灼烧/中毒 DOT 与冰减速
+  resFire:   { name: "火抗", base: 0.12, fmt: v => `火抗 +${Math.round(v * 100)}%` },
+  resIce:    { name: "冰抗", base: 0.12, fmt: v => `冰抗 +${Math.round(v * 100)}%` },
+  resPoison: { name: "毒抗", base: 0.12, fmt: v => `毒抗 +${Math.round(v * 100)}%` }
 };
 const GEAR_NAMES = {
   helm: ["铁盔", "猎手帽", "王冠", "兜鍪", "羽冠"],
@@ -579,7 +583,7 @@ class AudioSystem {
     osc.start(t);
     osc.stop(t + dur + 0.02);
   }
-  // ── 背景音乐：Web Audio 合成循环（5 章节主题不同）──
+  // ── 背景音乐：Web Audio 多层编曲循环（v3.55 完整编曲：旋律+和弦Pad+低音+鼓节奏+AB乐句）──
   // 主题：0森林轻快 / 1沙漠低沉 / 2冰原空灵 / 3火狱激昂 / 4暗影诡异
   bgmStart(theme) {
     this.ensure();
@@ -587,32 +591,82 @@ class AudioSystem {
     this.bgmStop();
     this.bgmTheme = theme;
     const T = BGM_THEMES[theme] || BGM_THEMES[0];
-    const beatMs = 60000 / T.bpm;
+    const stepMs = 60000 / T.bpm / 2; // 16 分音符步进
     this.bgmStep = 0;
+    this.bgmBar = 0; // 第几小节（4 小节循环，控制 AB 乐句）
     this.bgmTimer = setInterval(() => {
       if (this.muted || !this.ctx) return;
-      const step = this.bgmStep++;
-      const note = T.scale[step % T.scale.length];
-      if (note > 0) this._bgmNote(note, beatMs / 1000 * 0.85, T.wave, T.vol);
-      if (step % 4 === 0) this._bgmNote(T.bass, beatMs / 1000 * 3.2, "sine", T.bassVol);
-    }, beatMs);
+      const s = this.bgmStep % 32;              // 32 步 = 4 小节
+      const bar = Math.floor(s / 8);            // 当前小节 0-3
+      const ch = T.chords[bar % T.chords.length];
+      const root = ch[0];
+      // 旋律（AB 乐句：前 2 小节 A 段，后 2 小节 B 段变奏）
+      const mel = (bar < 2 ? T.melA : T.melB) || T.melA;
+      const deg = mel[s % mel.length];
+      if (deg >= 0) {
+        const iv = CHORD_INT[ch[1]][deg % 3] + Math.floor(deg / 3) * 12; // 和弦音 + 八度
+        const f = root * Math.pow(2, iv / 12);
+        this._bgmNote(f, stepMs / 1000 * 0.8, T.wave, T.leadVol, 1.01);
+      }
+      // 低音（bassPat 踩根音低八度）
+      if (T.bassPat[s % T.bassPat.length]) {
+        this._bgmNote(root / 2, stepMs / 1000 * 1.5, "sine", T.bassVol, 0.995);
+      }
+      // 打击：kick（60Hz 低频脉冲）+ hat（高频短音）
+      if (T.kickPat[s % T.kickPat.length]) this._bgmKick(stepMs);
+      if (T.hatPat[s % T.hatPat.length]) this._bgmHat(stepMs);
+      // 每小节开头铺和弦 Pad（长音）
+      if (s % 8 === 0) {
+        const ivs = CHORD_INT[ch[1]];
+        for (const iv of ivs) this._bgmNote(root * Math.pow(2, iv / 12), stepMs / 1000 * 7.5, T.padWave || "sine", T.padVol, 1);
+      }
+      this.bgmStep++;
+    }, stepMs);
   }
   bgmStop() {
     if (this.bgmTimer) { clearInterval(this.bgmTimer); this.bgmTimer = null; }
   }
-  _bgmNote(freq, dur, wave, gain) {
+  _bgmNote(freq, dur, wave, gain, slide) {
     const t = this.ctx.currentTime;
     const osc = this.ctx.createOscillator();
     const g = this.ctx.createGain();
     osc.type = wave;
     osc.frequency.setValueAtTime(freq, t);
+    if (slide && slide !== 1) osc.frequency.exponentialRampToValueAtTime(Math.max(30, freq * slide), t + dur);
     g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(gain, t + 0.02);
+    g.gain.exponentialRampToValueAtTime(gain, t + 0.015);
     g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
     osc.connect(g);
     g.connect(this.master);
     osc.start(t);
     osc.stop(t + dur + 0.03);
+  }
+  _bgmKick(stepMs) {
+    const t = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(120, t);
+    osc.frequency.exponentialRampToValueAtTime(45, t + 0.12);
+    g.gain.setValueAtTime(0.06, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.14);
+    osc.connect(g);
+    g.connect(this.master);
+    osc.start(t);
+    osc.stop(t + 0.16);
+  }
+  _bgmHat(stepMs) {
+    const t = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    osc.type = "triangle";
+    osc.frequency.setValueAtTime(6800, t);
+    g.gain.setValueAtTime(0.022, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.045);
+    osc.connect(g);
+    g.connect(this.master);
+    osc.start(t);
+    osc.stop(t + 0.06);
   }
   shoot() { this.tone(520, 0.06, "triangle", 0.18, 1.8); }
   hit() { this.tone(180, 0.08, "square", 0.12, 0.65); }
@@ -624,13 +678,57 @@ class AudioSystem {
   coin() { this.tone(1320, 0.05, "sine", 0.07, 1.9); }
 }
 
-// BGM 主题配置：音阶（Hz）+ BPM + 波形 + 音量
+// 和弦音程（半音偏移）：major 大三 / minor 小三 / sus4 挂四
+const CHORD_INT = { major: [0, 4, 7], minor: [0, 3, 7], sus4: [0, 5, 7], dim: [0, 3, 6] };
+
+// BGM 主题配置（v3.55 完整编曲）：bpm + 和弦进行（根音Hz,类型）×4 + AB 旋律乐句（16 步，-1=休止，0=根音1=三音2=五音3=高八度根音…）
+// + bassPat/kickPat/hatPat 节奏型（16 步，1=发声）
 const BGM_THEMES = [
-  { name: "森林", bpm: 132, wave: "triangle", vol: 0.05, bass: 131, bassVol: 0.035, scale: [523, 659, 784, 659, 880, 784, 659, 523] },   // C大调轻快
-  { name: "沙漠", bpm: 92, wave: "sine", vol: 0.055, bass: 98, bassVol: 0.04, scale: [196, 220, 262, 220, 294, 262, 220, 196] },         // 低沉神秘
-  { name: "冰原", bpm: 76, wave: "sine", vol: 0.05, bass: 196, bassVol: 0.03, scale: [784, 988, 784, 659, 784, 988, 1175, 988] },        // 空灵高音
-  { name: "火狱", bpm: 150, wave: "sawtooth", vol: 0.04, bass: 110, bassVol: 0.035, scale: [440, 554, 659, 554, 880, 659, 554, 440] },  // 激昂
-  { name: "暗影", bpm: 84, wave: "square", vol: 0.035, bass: 55, bassVol: 0.03, scale: [220, 233, 220, 208, 220, 233, 262, 233] }       // 诡异半音
+  {
+    name: "森林", bpm: 120, wave: "triangle", leadVol: 0.042, padWave: "sine", padVol: 0.03, bassVol: 0.04,
+    chords: [[261.6, "major"], [196.0, "major"], [220.0, "minor"], [261.6, "major"]],   // C G Am F 明亮进行
+    melA: [0, -1, 2, -1, 3, -1, 2, 4, -1, 3, 5, -1, 3, 2, 4, -1],                        // 活泼跳跃
+    melB: [0, -1, 2, -1, 3, -1, 2, 4, 5, -1, 7, -1, 4, 3, 2, -1],                        // 上行变奏
+    bassPat: [1, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 1],
+    kickPat: [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0],
+    hatPat: [0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1]
+  },
+  {
+    name: "沙漠", bpm: 92, wave: "square", leadVol: 0.03, padWave: "sine", padVol: 0.026, bassVol: 0.045,
+    chords: [[146.8, "minor"], [196.0, "major"], [146.8, "minor"], [196.0, "major"]],    // Dm G 循环，异域稳定
+    melA: [0, 3, 2, 3, -1, 2, 0, -1, 1, 2, 1, 0, -1, 2, 3, -1],                          // 摇曳旋律
+    melB: [0, 3, 2, 3, -1, 2, 4, -1, 5, 4, 2, 1, -1, 2, 0, -1],                          // 升高变奏
+    bassPat: [1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0],
+    kickPat: [1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
+    hatPat: [0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0]
+  },
+  {
+    name: "冰原", bpm: 76, wave: "sine", leadVol: 0.045, padWave: "sine", padVol: 0.032, bassVol: 0.032,
+    chords: [[164.8, "minor"], [130.8, "major"], [196.0, "major"], [146.8, "minor"]],    // Em C G Dm 空灵
+    melA: [3, -1, 4, -1, 3, -1, 2, -1, 1, -1, 3, -1, 0, -1, -1, -1],                     // 稀疏钟声
+    melB: [3, -1, 4, -1, 5, -1, 4, -1, 3, -1, 2, -1, 1, 0, -1, -1],                      // 下行叹息
+    bassPat: [1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0],
+    kickPat: [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0],
+    hatPat: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  },
+  {
+    name: "火狱", bpm: 150, wave: "sawtooth", leadVol: 0.035, padWave: "square", padVol: 0.02, bassVol: 0.042,
+    chords: [[174.6, "minor"], [138.6, "major"], [155.6, "major"], [174.6, "minor"]],    // Fm Db Eb Fm 紧张
+    melA: [0, 0, 2, 3, 2, 0, 3, -1, 0, 0, 2, 3, 5, 4, 3, 2],                             // 急促推动
+    melB: [0, 0, 2, 3, 2, 0, 3, -1, 5, 5, 7, 6, 5, 4, 3, 2],                             // 高亢变奏
+    bassPat: [1, 1, 0, 1, 1, 0, 0, 1, 1, 1, 0, 1, 1, 0, 0, 1],
+    kickPat: [1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0],
+    hatPat: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+  },
+  {
+    name: "暗影", bpm: 96, wave: "square", leadVol: 0.03, padWave: "sawtooth", padVol: 0.018, bassVol: 0.045,
+    chords: [[196.0, "minor"], [130.8, "minor"], [196.0, "minor"], [130.8, "minor"]],    // Gm Cm 半音诡异
+    melA: [0, -1, 1, -1, 0, 2, -1, 1, -1, 0, 1, -1, 0, -1, -1, 2],                       // 犹豫不决
+    melB: [0, -1, 1, -1, 0, 2, -1, 3, 2, -1, 1, -1, 0, -1, -1, -1],                      // 阴郁下行
+    bassPat: [1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
+    kickPat: [1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
+    hatPat: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  }
 ];
 
 const audio = new AudioSystem();
@@ -946,7 +1044,12 @@ class Bullet {
     if (this.x < -40 || this.x > CONFIG.W + 40 || this.y < -60 || this.y > CONFIG.H + 80) this.active = false;
     if (this.active && game.player.canBeHit() && Util.circleHit(this, game.player)) {
       this.active = false;
-      game.player.hurt(this.damage, game, 0, 36);
+      game.player.hurt(this.damage, game, 0, 36, this.elem);
+      // 元素弹命中反馈粒子（v3.55 怪物属性攻击）
+      if (this.elem) {
+        const ec = this.elem === "fire" ? "#ff7b3d" : this.elem === "ice" ? "#9fe8ff" : "#8aff5c";
+        for (let i = 0; i < 8; i++) game.particles.get(game.player.x, game.player.y - 16, Util.rand(-60, 60), Util.rand(-80, 20), 0.4, ec, Util.rand(2, 5));
+      }
       // 属性弹：命中附加 DOT/减速
       if (this.elem === "fire") game.player.fireDotT = 3;       // 灼烧 3 秒
       else if (this.elem === "poison") game.player.poisonDotT = 3; // 中毒 3 秒
@@ -1702,10 +1805,10 @@ class Enemy {
       }
     }
     if (this.isBoss) drawBoss(g, this);
-    else if (this.type === "tank") drawTank(g);
-    else if (this.type === "archer") drawArcher(g);
+    else if (this.type === "tank") drawTank(g, this.t);
+    else if (this.type === "archer") drawArcher(g, this.t);
     else if (this.type === "flyer") drawFlyer(g, this.t);
-    else drawMinion(g);
+    else drawMinion(g, this.t);
     // 抗性标识：装甲=银框+盾标，灵体=蓝框+灵标
     if (this.armored) {
       g.strokeStyle = "#c9d4e0";
@@ -1941,7 +2044,7 @@ class Player {
     this.weaponSkinOverride = undefined; // 局内武器装备（undefined=用局外免费武器）
     // 局内装备（v3.52）：打怪掉落穿戴，死亡消失
     this.gear = { helm: null, armor: null, boots: null, trinket: null };
-    this.gearStats = { dmgMult: 1, rateMult: 1, critFlat: 0, hpFlat: 0, moveFlat: 0, goldMult: 1, expMult: 1, lifestealFlat: 0, dodgeFlat: 0, arrowFlat: 0, pierceFlat: 0 };
+    this.gearStats = { dmgMult: 1, rateMult: 1, critFlat: 0, hpFlat: 0, moveFlat: 0, goldMult: 1, expMult: 1, lifestealFlat: 0, dodgeFlat: 0, arrowFlat: 0, pierceFlat: 0, fireRes: 0, iceRes: 0, poisonRes: 0 };
     this.swords = [];
     this.inv = 0;
     this.pickedUpgrades = [];
@@ -2004,20 +2107,22 @@ class Player {
     }
     this.frostZoneT = Math.max(0, (this.frostZoneT || 0) - dt);
     // 属性弹 DOT/减速结算（火=灼烧 4/秒，毒=中毒 3/秒，冰=减速 45%）
+    // v3.55 装备抗性：火抗/毒抗减免 DOT 伤害，冰抗减免减速效果
+    const gs = this.gearStats || {};
     if (this.fireDotT > 0) {
       this.fireDotT -= dt;
-      this.hp -= 4 * dt;
+      this.hp -= 4 * dt * (1 - (gs.fireRes || 0));
       if (Math.random() < 0.5) game.particles.get(this.x, this.y - 20, Util.rand(-15, 15), Util.rand(-25, 5), 0.4, "#ff7b3d", Util.rand(2, 4));
     }
     if (this.poisonDotT > 0) {
       this.poisonDotT -= dt;
-      this.hp -= 3 * dt;
+      this.hp -= 3 * dt * (1 - (gs.poisonRes || 0));
       if (Math.random() < 0.4) game.particles.get(this.x, this.y - 16, Util.rand(-12, 12), Util.rand(-20, 5), 0.4, "#8aff5c", Util.rand(2, 4));
     }
     this.iceSlowT = Math.max(0, (this.iceSlowT || 0) - dt);
     if (this.hp <= 0) game.gameOver();
     const zoneSlow = this.frostZoneT > 0 ? 0.4 : 1;
-    const slowMul = this.iceSlowT > 0 ? 0.55 : 1;
+    const slowMul = this.iceSlowT > 0 ? 0.55 + 0.45 * (gs.iceRes || 0) : 1;
     // 移动：触摸/鼠标跟随受移速限制（防瞬移——甩鼠标不能瞬移，移速卡有意义）
     // 之前 Math.min(1, dt*14) 指数插值：鼠标甩对角玩家飞过去（瞬移感）+ 移速卡失效
     if (game.input.touching || game.input.hover) {
@@ -2873,6 +2978,11 @@ class Game {
     this.distance = (this.chapter - 1) * 600 + this.roomIndex * 100;
     this.updateBackdrop(dt);
     this.updateInRunShop(dt);
+    // 装备掉落提示计时（v3.55）
+    if (this.gearNotify && this.gearNotify.length) {
+      for (const n of this.gearNotify) n.t += dt;
+      this.gearNotify = this.gearNotify.filter(n => n.t < n.dur);
+    }
     // 局内商店/数值面板打开时暂停战斗（只更新玩家/粒子）
     if ((this.inRunShop && this.inRunShop.paused) || this.statsPanel) {
       for (const p of this.particles.active()) p.update(dt);
@@ -3186,6 +3296,10 @@ class Game {
     const q = GEAR_QUALITY[gear.quality];
     const desc = gear.stats.map(s => GEAR_STATS[s.t].fmt(s.v)).join(" ");
     this.flashMessage(`${q.name}·${GEAR_SLOT_NAMES[gear.slot]}「${gear.name}」已穿戴 ${desc}${old ? "（替换旧装备）" : ""}`);
+    // 屏幕边缘掉落提示（v3.55）：品质色小卡片，3 秒淡出，最多叠 3 条
+    this.gearNotify = this.gearNotify || [];
+    this.gearNotify.push({ gear, t: 0, dur: 3 });
+    if (this.gearNotify.length > 3) this.gearNotify.shift();
     for (let i = 0; i < 22; i++) this.particles.get(p.x, p.y - 20, Util.rand(-90, 90), Util.rand(-120, 30), 0.6, q.color, Util.rand(3, 7));
   }
   applyGearStats(gear, sign) {
@@ -3203,6 +3317,9 @@ class Game {
         case "dodge": gs.dodgeFlat = Math.max(0, gs.dodgeFlat + s.v * sign); break;
         case "arrow": gs.arrowFlat = Math.max(0, gs.arrowFlat + s.v * sign); break;
         case "pierce": gs.pierceFlat = Math.max(0, gs.pierceFlat + s.v * sign); break;
+        case "resFire": gs.fireRes = Util.clamp(gs.fireRes + s.v * sign, 0, 0.75); break;
+        case "resIce": gs.iceRes = Util.clamp(gs.iceRes + s.v * sign, 0, 0.75); break;
+        case "resPoison": gs.poisonRes = Util.clamp(gs.poisonRes + s.v * sign, 0, 0.75); break;
       }
     }
   }
@@ -3353,6 +3470,8 @@ class Game {
     if (this.state === "CHOOSE" && this.choices) {
       drawChoiceCards(g, this);
     }
+    // 装备掉落提示（最上层：三选一/商店遮罩之上，防被盖住，v3.55）
+    drawGearNotify(g, this);
     // Boss 出场演出：红色暗幕 + 顶部血光
     if (this.bossIntro > 0) {
       const a = Util.clamp(this.bossIntro / 1.2, 0, 1);
@@ -3787,27 +3906,50 @@ function drawStonePlatform(g, x, y, r) {
   g.restore();
 }
 
-function drawMinion(g) {
-  // 哥布林：绿皮小怪，红眼，尖耳
-  g.fillStyle = "#3f7a3a";
-  g.beginPath();
-  g.ellipse(0, 2, 17, 19, 0, 0, TAU);
-  g.fill();
+function drawMinion(g, t) {
+  // 哥布林：绿皮小怪，红眼，尖耳（v3.55 优化：走路摇摆+腿部动画+眨眼+发光眼）
+  const sway = Math.sin(t * 7) * 2.2;      // 走路左右摇摆
+  const bob = Math.abs(Math.sin(t * 7)) * 3; // 走路上下颠簸
+  const blink = (t % 3.2) < 0.12 ? 0 : 1;   // 眨眼
+  g.save();
+  g.translate(sway, -bob * 0.5);
   // 尖耳
   g.fillStyle = "#3f7a3a";
   g.beginPath();
   g.moveTo(-12, -8); g.lineTo(-20, -20); g.lineTo(-6, -2); g.closePath();
   g.moveTo(12, -8); g.lineTo(20, -20); g.lineTo(6, -2); g.closePath();
   g.fill();
+  // 身体（渐变绿皮）
+  const bodyG = g.createRadialGradient(0, -6, 4, 0, 2, 20);
+  bodyG.addColorStop(0, "#5da54c");
+  bodyG.addColorStop(1, "#35702f");
+  g.fillStyle = bodyG;
+  g.beginPath();
+  g.ellipse(0, 2, 17, 19, 0, 0, TAU);
+  g.fill();
+  // 肚皮
+  g.fillStyle = "#7cba5e";
+  g.beginPath();
+  g.ellipse(0, 8, 9, 8, 0, 0, TAU);
+  g.fill();
   // 脸
   g.fillStyle = "#5a9a4a";
   g.beginPath();
   g.ellipse(0, -3, 12, 13, 0, 0, TAU);
   g.fill();
-  // 红眼
+  // 发光红眼（脉冲）
+  const eyeGlow = 0.7 + 0.3 * Math.sin(t * 5);
+  g.shadowBlur = 8 * eyeGlow;
+  g.shadowColor = "#ff4433";
   g.fillStyle = "#ff4433";
-  g.fillRect(-8, -8, 4, 4);
-  g.fillRect(4, -8, 4, 4);
+  if (blink) {
+    g.fillRect(-8, -8, 4, 4);
+    g.fillRect(4, -8, 4, 4);
+  } else {
+    g.fillRect(-8, -7, 4, 1.5);
+    g.fillRect(4, -7, 4, 1.5);
+  }
+  g.shadowBlur = 0;
   // 嘴巴
   g.fillStyle = "#2a4a25";
   g.fillRect(-5, 4, 10, 3);
@@ -3815,46 +3957,84 @@ function drawMinion(g) {
   g.fillStyle = "#fff";
   g.beginPath(); g.moveTo(-4, 6); g.lineTo(-2, 10); g.lineTo(-1, 6); g.closePath(); g.fill();
   g.beginPath(); g.moveTo(4, 6); g.lineTo(2, 10); g.lineTo(1, 6); g.closePath(); g.fill();
+  // 小短腿（交替摆动走路）
+  const legSwing = Math.sin(t * 7) * 4;
+  g.fillStyle = "#2f5e28";
+  g.fillRect(-9, 15 + legSwing * 0.4, 6, 7 - legSwing * 0.3);
+  g.fillRect(3, 15 - legSwing * 0.4, 6, 7 + legSwing * 0.3);
+  g.restore();
 }
 
-function drawArcher(g) {
-  // 骷髅弓手：白骨 + 兜帽 + 弓
-  g.fillStyle = "#d8d4c8";
-  g.beginPath();
-  g.ellipse(0, 0, 16, 19, 0, 0, TAU);
-  g.fill();
-  // 头骨
-  g.fillStyle = "#f0ece0";
-  g.beginPath();
-  g.arc(0, -6, 9, 0, TAU);
-  g.fill();
-  // 眼窝
-  g.fillStyle = "#1a1a22";
-  g.fillRect(-6, -9, 4, 5);
-  g.fillRect(2, -9, 4, 5);
-  // 兜帽
+function drawArcher(g, t) {
+  // 骷髅弓手：白骨 + 兜帽 + 弓（v3.55 优化：拉弓动画+浮空摆动+骨感关节）
+  const hover = Math.sin(t * 3) * 2;       // 浮空摆动
+  const pull = 0.55 + 0.25 * Math.sin(t * 2.2); // 拉弓弦动画（呼吸式拉放）
+  g.save();
+  g.translate(0, hover);
+  // 兜帽（先画在背后）
   g.fillStyle = "#5a4a3a";
   g.beginPath();
   g.moveTo(-10, -8); g.quadraticCurveTo(0, -22, 10, -8);
   g.lineTo(8, 4); g.lineTo(-8, 4); g.closePath();
   g.fill();
-  // 弓（骨弓）
+  // 身体（白骨，带关节感）
+  const bodyG = g.createRadialGradient(0, 0, 3, 0, 0, 20);
+  bodyG.addColorStop(0, "#f5f1e6");
+  bodyG.addColorStop(1, "#cfc9b8");
+  g.fillStyle = bodyG;
+  g.beginPath();
+  g.ellipse(0, 0, 16, 19, 0, 0, TAU);
+  g.fill();
+  // 肋骨线
+  g.strokeStyle = "rgba(140,132,110,0.5)";
+  g.lineWidth = 1.5;
+  for (let i = 0; i < 3; i++) {
+    g.beginPath(); g.moveTo(-8, 2 + i * 4); g.lineTo(8, 2 + i * 4); g.stroke();
+  }
+  // 头骨
+  g.fillStyle = "#f0ece0";
+  g.beginPath();
+  g.arc(0, -6, 9, 0, TAU);
+  g.fill();
+  // 眼窝（暗红灵魂之火）
+  g.shadowBlur = 6;
+  g.shadowColor = "#ff5a3d";
+  g.fillStyle = "#c03020";
+  g.fillRect(-6, -9, 4, 5);
+  g.fillRect(2, -9, 4, 5);
+  g.shadowBlur = 0;
+  // 鼻洞
+  g.fillStyle = "#1a1a22";
+  g.beginPath(); g.moveTo(-1, -6); g.lineTo(1, -6); g.lineTo(0, -4); g.closePath(); g.fill();
+  // 骨弓 + 拉弦动画（弦随 pull 拉动）
   g.strokeStyle = "#b8b0a0";
   g.lineWidth = 3;
   g.beginPath();
   g.arc(18, -2, 12, -Math.PI / 2.3, Math.PI / 2.3);
   g.stroke();
-  g.strokeStyle = "rgba(200,190,170,0.6)";
-  g.lineWidth = 1;
+  // 弓弦（拉动时弦线后弯）
+  g.strokeStyle = "rgba(200,190,170,0.8)";
+  g.lineWidth = 1.2;
+  const bx1 = 18 + Math.cos(-Math.PI / 2.3) * 12, by1 = -2 + Math.sin(-Math.PI / 2.3) * 12;
+  const bx2 = 18 + Math.cos(Math.PI / 2.3) * 12, by2 = -2 + Math.sin(Math.PI / 2.3) * 12;
+  const midX = bx1 + (bx2 - bx1) * 0.5 + pull * 4, midY = by1 + (by2 - by1) * 0.5 + pull * 3;
   g.beginPath();
-  g.moveTo(18 + Math.cos(-Math.PI / 2.3) * 12, -2 + Math.sin(-Math.PI / 2.3) * 12);
-  g.lineTo(18 + Math.cos(Math.PI / 2.3) * 12, -2 + Math.sin(Math.PI / 2.3) * 12);
+  g.moveTo(bx1, by1); g.quadraticCurveTo(midX, midY, bx2, by2);
   g.stroke();
+  g.restore();
 }
 
-function drawTank(g) {
-  // 石巨人：灰岩块 + 裂纹 + 发光眼
-  g.fillStyle = "#7a7a72";
+function drawTank(g, t) {
+  // 石巨人：灰岩块 + 裂纹 + 发光眼（v3.55 优化：顿步颠簸+石臂+眼睛脉冲）
+  const stomp = Math.abs(Math.sin(t * 3.5)) * 3; // 沉重顿步
+  const armSwing = Math.sin(t * 3.5) * 2.5;
+  g.save();
+  g.translate(0, -stomp);
+  // 岩石身躯（渐变灰岩）
+  const rockG = g.createLinearGradient(0, -26, 0, 20);
+  rockG.addColorStop(0, "#8f8f86");
+  rockG.addColorStop(1, "#5c5c54");
+  g.fillStyle = rockG;
   g.beginPath();
   g.moveTo(-22, 8);
   g.lineTo(-18, -18);
@@ -3866,24 +4046,56 @@ function drawTank(g) {
   g.lineTo(-14, 20);
   g.closePath();
   g.fill();
-  // 裂纹
-  g.strokeStyle = "rgba(40,40,35,0.6)";
+  // 裂纹（更明显）
+  g.strokeStyle = "rgba(40,40,35,0.7)";
   g.lineWidth = 2;
   g.beginPath();
   g.moveTo(-8, -12); g.lineTo(-2, -4); g.lineTo(-6, 6);
+  g.moveTo(10, -16); g.lineTo(4, -8); g.lineTo(8, 0);
   g.stroke();
-  // 发光眼
+  // 岩块纹理点
+  g.fillStyle = "rgba(60,60,55,0.5)";
+  g.fillRect(-16, -4, 4, 3);
+  g.fillRect(6, 6, 5, 3);
+  g.fillRect(-4, -18, 3, 3);
+  // 石臂（摆动）
+  g.fillStyle = "#6e6e66";
+  g.save();
+  g.translate(-20, -6);
+  g.rotate(armSwing * 0.05);
+  g.fillRect(-7, -2, 10, 16);
+  g.beginPath(); g.arc(-2, 16, 6, 0, TAU); g.fill();
+  g.restore();
+  g.save();
+  g.translate(22, -2);
+  g.rotate(-armSwing * 0.05);
+  g.fillRect(-3, -2, 10, 16);
+  g.beginPath(); g.arc(7, 16, 6, 0, TAU); g.fill();
+  g.restore();
+  // 发光眼（橙色脉冲）
+  const eyePulse = 0.6 + 0.4 * Math.sin(t * 4);
+  g.shadowBlur = 10 * eyePulse;
+  g.shadowColor = "#ff8a3d";
   g.fillStyle = "#ff8a3d";
   g.fillRect(-12, -10, 7, 5);
   g.fillRect(6, -10, 7, 5);
+  g.shadowBlur = 0;
+  g.restore();
 }
 
 function drawFlyer(g, t) {
-  // 蝙蝠魔：翼展 + 身体 + 红眼
+  // 蝙蝠魔：翼展 + 身体 + 红眼（v3.55 优化：獠牙+尾翼+身体纹理）
   const flap = Math.sin(t * 10) * 0.5;
   g.save();
   g.translate(0, Math.sin(t * 8) * 3);
-  // 翅膀（扑动）
+  // 尾翼（下方小三角，飘动）
+  g.fillStyle = "#4a3a62";
+  g.beginPath();
+  g.moveTo(-3, 12);
+  g.quadraticCurveTo(0, 16 + Math.sin(t * 12) * 3, 3, 12);
+  g.closePath();
+  g.fill();
+  // 翅膀（扑动，双层膜感）
   g.fillStyle = "#5a4a72";
   g.beginPath();
   g.moveTo(-2, -4);
@@ -3896,15 +4108,32 @@ function drawFlyer(g, t) {
   g.quadraticCurveTo(20, 6, 4, 4);
   g.closePath();
   g.fill();
-  // 身体
-  g.fillStyle = "#4a3a62";
+  // 翅膜骨线
+  g.strokeStyle = "rgba(90,74,114,0.8)";
+  g.lineWidth = 1;
+  g.beginPath();
+  g.moveTo(-2, -4); g.lineTo(-18, -8 - flap * 8);
+  g.moveTo(2, -4); g.lineTo(18, -8 - flap * 8);
+  g.stroke();
+  // 身体（渐变紫）
+  const bodyG = g.createRadialGradient(0, -2, 2, 0, 0, 14);
+  bodyG.addColorStop(0, "#5c4a78");
+  bodyG.addColorStop(1, "#3d2f55");
+  g.fillStyle = bodyG;
   g.beginPath();
   g.ellipse(0, 0, 12, 14, 0, 0, TAU);
   g.fill();
-  // 红眼
+  // 红眼（发光）
+  g.shadowBlur = 8;
+  g.shadowColor = "#ff5544";
   g.fillStyle = "#ff5544";
   g.fillRect(-6, -5, 4, 4);
   g.fillRect(2, -5, 4, 4);
+  g.shadowBlur = 0;
+  // 獠牙
+  g.fillStyle = "#e8e4d8";
+  g.beginPath(); g.moveTo(-3, 4); g.lineTo(-2, 8); g.lineTo(-1, 4); g.closePath(); g.fill();
+  g.beginPath(); g.moveTo(1, 4); g.lineTo(2, 8); g.lineTo(3, 4); g.closePath(); g.fill();
   // 尖耳
   g.fillStyle = "#4a3a62";
   g.beginPath();
@@ -4498,6 +4727,10 @@ function drawStatsPanel(g, state) {
   if (p.staveSplit) mechs.push("➿分裂球");
   if (p.staveDrain) mechs.push("🩸汲取");
   if (p.elemBoost > 1) mechs.push("🔮元素×" + p.elemBoost.toFixed(1));
+  const gsRes = p.gearStats || {};
+  if ((gsRes.fireRes || 0) > 0) mechs.push("🔥抗" + Math.round(gsRes.fireRes * 100) + "%");
+  if ((gsRes.iceRes || 0) > 0) mechs.push("❄抗" + Math.round(gsRes.iceRes * 100) + "%");
+  if ((gsRes.poisonRes || 0) > 0) mechs.push("☠抗" + Math.round(gsRes.poisonRes * 100) + "%");
   if (p.burnMult) mechs.push("🔥灼烧×" + p.burnMult.toFixed(1));
   if (p.slowMult) mechs.push("❄减速×" + p.slowMult.toFixed(1));
   g.textAlign = "left";
@@ -4866,9 +5099,55 @@ function drawHud(g, state) {
   g.restore();
 }
 
+// 装备掉落提示：屏幕右侧边缘弹出品质色小卡片（v3.55）
+function drawGearNotify(g, state) {
+  const list = state.gearNotify || [];
+  if (!list.length) return;
+  g.save();
+  for (let i = 0; i < list.length; i++) {
+    const n = list[i];
+    const q = GEAR_QUALITY[n.gear.quality];
+    const fadeIn = Util.clamp(n.t / 0.2, 0, 1);
+    const fadeOut = Util.clamp((n.dur - n.t) / 0.4, 0, 1);
+    const a = Math.min(fadeIn, fadeOut);
+    const y = 130 + i * 56;
+    g.globalAlpha = a;
+    // 滑入动画
+    const slide = (1 - fadeIn) * 30;
+    const x = CONFIG.W - 128 - slide;
+    // 卡片底
+    g.fillStyle = "rgba(11,16,13,0.92)";
+    roundRect(g, x, y, 120, 48, 8); g.fill();
+    g.shadowBlur = 12;
+    g.shadowColor = q.color;
+    g.strokeStyle = q.color;
+    g.lineWidth = 2.5;
+    roundRect(g, x, y, 120, 48, 8); g.stroke();
+    g.shadowBlur = 0;
+    // 品质色图标圆
+    g.fillStyle = q.color;
+    g.beginPath();
+    g.arc(x + 22, y + 24, 13, 0, TAU);
+    g.fill();
+    g.fillStyle = "#131b14";
+    g.textAlign = "center";
+    g.font = "bold 14px Microsoft YaHei, sans-serif";
+    g.fillText(GEAR_SLOT_ICONS[n.gear.slot], x + 22, y + 29);
+    // 名称 + 品质
+    g.textAlign = "left";
+    g.fillStyle = q.color;
+    g.font = "bold 12px Microsoft YaHei, sans-serif";
+    g.fillText(`${q.name}·${n.gear.name}`, x + 42, y + 19);
+    // 属性摘要
+    g.fillStyle = "#c8d2de";
+    g.font = "10px Microsoft YaHei, sans-serif";
+    const desc = n.gear.stats.map(s => GEAR_STATS[s.t].fmt(s.v)).join(" ");
+    g.fillText(desc.length > 13 ? desc.slice(0, 13) + "…" : desc, x + 42, y + 36);
+  }
+  g.restore();
+}
+
 function drawMute(g) {
-  // 音效开关按钮：全局固定右上角（避开左上角血条 HUD）
-  // v3.54: 左移 W-100（原 W-86 与 📊 面板按钮 W-40 仅 6px 间距，视觉贴在一起）
   g.save();
   g.fillStyle = "rgba(13,20,14,0.65)";
   roundRect(g, CONFIG.W - 100, 16, 40, 30, 8); g.fill();
@@ -4941,7 +5220,7 @@ function drawMenu(g, state) {
   g.shadowBlur = 6 + 6 * pulse;
   g.fillStyle = "#d4c6af";
   g.font = "20px Microsoft YaHei, sans-serif";
-  g.fillText("v3.54 · 房间闯关 · 排行榜 · 每日挑战", CONFIG.W / 2, 292);
+  g.fillText("v3.55 · 房间闯关 · 排行榜 · 每日挑战", CONFIG.W / 2, 292);
   g.fillStyle = "#ffe59a";
   g.font = "bold 18px Microsoft YaHei, sans-serif";
   g.fillText(Leaderboard.champion || "暂无王者", CONFIG.W / 2, 326);
