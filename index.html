@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-  <title>箭雨 v3.53</title>
+  <title>箭雨 v3.54</title>
   <style>
     html, body {
       margin: 0;
@@ -50,8 +50,8 @@
   </style>
 </head>
 <body>
-  <canvas id="game" width="540" height="960" aria-label="箭雨 v3.53 游戏画布"></canvas>
-  <div id="landscapeBlocker">请旋转设备为竖屏<br>箭雨 v3.53 仅支持竖屏飞行</div>
+  <canvas id="game" width="540" height="960" aria-label="箭雨 v3.54 游戏画布"></canvas>
+  <div id="landscapeBlocker">请旋转设备为竖屏<br>箭雨 v3.54 仅支持竖屏飞行</div>
 <script>
 "use strict";
 
@@ -1971,6 +1971,9 @@ class Player {
       return;
     }
     this.hp -= dmg;
+    // v3.54: 立即检查死亡（防 hp 负值）——原来只在 Player.update 检查，商店/面板打开时
+    // update 提前 return 跳过检查 → hp 持续负值 → 血条宽度 136×hpP 为负 → roundRect 负半径抛错 → 渲染每帧中断
+    if (this.hp <= 0) game.gameOver();
     // 荆棘反伤（受击反弹伤害给所有近身敌人）
     if (this.thorns > 0) {
       for (const e of game.enemies.active()) {
@@ -4137,14 +4140,14 @@ function drawInRunShop(g, state) {
   g.fillStyle = "#f7c948";
   g.font = "bold 16px Microsoft YaHei, sans-serif";
   g.fillText(`局内金币 ${state.runGold || 0}`, CONFIG.W / 2, 192);
-  // 局内强化 6 格（2 行 3 列）
-  const w = 146, h = 88, gap = 14;
+  // 局内强化 4 格（2 行 2 列，卡更宽更清晰——v3.54 原 2×3 布局第 2 行只有 1 个失衡）
+  const w = 210, h = 88, gap = 16;
   for (let i = 0; i < items.length; i++) {
     const item = items[i];
-    const col = i % 3;
-    const row = Math.floor(i / 3);
+    const col = i % 2;
+    const row = Math.floor(i / 2);
     const x = 48 + col * (w + gap);
-    const y = 246 + row * 106;
+    const y = 246 + row * 102;
     const afford = (state.runGold || 0) >= item.price;
     g.fillStyle = item.sold ? "rgba(255,255,255,0.08)" : afford ? "rgba(247,201,72,0.16)" : "rgba(255,255,255,0.08)";
     roundRect(g, x, y, w, h, 8); g.fill();
@@ -4167,7 +4170,7 @@ function drawInRunShop(g, state) {
   }
   // 武器区（局内金币购买，本局生效，死亡回免费武器）
   const s = SaveSystem.data;
-  const wy = 458;
+  const wy = 470;
   g.fillStyle = "#9aa5b4";
   g.font = "12px Microsoft YaHei, sans-serif";
   g.textAlign = "left";
@@ -4755,13 +4758,13 @@ function drawHud(g, state) {
   roundRect(g, 28, 31, 136, 14, 7); g.fill();
   if (ghostP > hpP) {
     g.fillStyle = "#ff9b6b";
-    roundRect(g, 28, 31, 136 * ghostP, 14, 7); g.fill();
+    roundRect(g, 28, 31, Math.max(0, 136 * ghostP), 14, 7); g.fill();
   }
   g.fillStyle = "#de5952";
-  roundRect(g, 28, 31, 136 * hpP, 14, 7); g.fill();
+  roundRect(g, 28, 31, Math.max(0, 136 * hpP), 14, 7); g.fill();
   // 血条光泽
   g.fillStyle = "rgba(255,255,255,0.18)";
-  roundRect(g, 28, 31, 136 * hpP, 5, 3); g.fill();
+  roundRect(g, 28, 31, Math.max(0, 136 * hpP), 5, 3); g.fill();
   g.fillStyle = CONFIG.COLORS.ui;
   g.font = "14px Microsoft YaHei, sans-serif";
   g.fillText(`${Math.ceil(state.player.hp)}/${state.player.maxHp}`, 70, 62);
@@ -4865,16 +4868,17 @@ function drawHud(g, state) {
 
 function drawMute(g) {
   // 音效开关按钮：全局固定右上角（避开左上角血条 HUD）
+  // v3.54: 左移 W-100（原 W-86 与 📊 面板按钮 W-40 仅 6px 间距，视觉贴在一起）
   g.save();
   g.fillStyle = "rgba(13,20,14,0.65)";
-  roundRect(g, CONFIG.W - 86, 16, 40, 30, 8); g.fill();
+  roundRect(g, CONFIG.W - 100, 16, 40, 30, 8); g.fill();
   g.strokeStyle = audio.muted ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.45)";
   g.lineWidth = 2;
-  roundRect(g, CONFIG.W - 86, 16, 40, 30, 8); g.stroke();
+  roundRect(g, CONFIG.W - 100, 16, 40, 30, 8); g.stroke();
   g.fillStyle = CONFIG.COLORS.ui;
   g.font = "bold 16px Arial";
   g.textAlign = "center";
-  g.fillText(audio.muted ? "🔇" : "🔊", CONFIG.W - 66, 38);
+  g.fillText(audio.muted ? "🔇" : "🔊", CONFIG.W - 80, 38);
   g.restore();
 }
 
@@ -4937,7 +4941,7 @@ function drawMenu(g, state) {
   g.shadowBlur = 6 + 6 * pulse;
   g.fillStyle = "#d4c6af";
   g.font = "20px Microsoft YaHei, sans-serif";
-  g.fillText("v3.53 · 房间闯关 · 排行榜 · 每日挑战", CONFIG.W / 2, 292);
+  g.fillText("v3.54 · 房间闯关 · 排行榜 · 每日挑战", CONFIG.W / 2, 292);
   g.fillStyle = "#ffe59a";
   g.font = "bold 18px Microsoft YaHei, sans-serif";
   g.fillText(Leaderboard.champion || "暂无王者", CONFIG.W / 2, 326);
@@ -5269,10 +5273,7 @@ function canvasPoint(evt) {
 
 function activateAt(x, y) {
   audio.ensure();
-  if (x >= 20 && x <= 62 && y >= 82 && y <= 114) {
-    audio.toggle();
-    return;
-  }
+  // ⚠️ 旧版左上角音效按钮分支已删除（与暂停键区域重叠，会抢先拦截暂停触发）
   if (game.state === "CHOOSE" && game.choices) {
     // 三张卡：与 drawChoiceCards 布局一致
     const cardW = 146, cardH = 224, gap = 18;
@@ -5309,7 +5310,7 @@ function activateAt(x, y) {
     return;
   }
   // 音效开关按钮：全局右上角（所有状态最先判断）
-  if (x >= CONFIG.W - 86 && x <= CONFIG.W - 46 && y >= 16 && y <= 46) { audio.toggle(); return; }
+  if (x >= CONFIG.W - 100 && x <= CONFIG.W - 60 && y >= 16 && y <= 46) { audio.toggle(); return; }
   // 暂停系统：战斗中的 ⏸ 键 + 暂停菜单按钮（最优先，先于一切战斗交互）
   if (game.state === "PLAY") {
     if (!game.paused && x >= 16 && x <= 76 && y >= 78 && y <= 122) { game.paused = true; return; }
@@ -5328,11 +5329,11 @@ function activateAt(x, y) {
       game.dismissInRunShop();
       return;
     }
-    // 局内强化 6 格（y 246/348，h 88）
-    const w = 146, h = 88, gap = 14;
+    // 局内强化 4 格（2 行 2 列，y 246/348，h 88）
+    const w = 210, h = 88, gap = 16;
     for (let i = 0; i < shop.items.length; i++) {
-      const col = i % 3;
-      const row = Math.floor(i / 3);
+      const col = i % 2;
+      const row = Math.floor(i / 2);
       const bx = 48 + col * (w + gap);
       const by = 246 + row * 102;
       if (x >= bx && x <= bx + w && y >= by && y <= by + h) {
@@ -5340,11 +5341,11 @@ function activateAt(x, y) {
         return;
       }
     }
-    // 武器区（wy=458：武器卡 y 472-528，x=44+120i 宽 112）
+    // 武器区（wy=470：武器卡 y 484-560，x=44+120i 宽 112）
     const wList = isStaveMode() ? WEAPON_STAVES : WEAPON_SKINS;
     for (let i = 0; i < wList.length; i++) {
       const wx = 44 + i * 120;
-      if (x >= wx && x <= wx + 112 && y >= 472 && y <= 528) {
+      if (x >= wx && x <= wx + 112 && y >= 484 && y <= 560) {
         game.buyMetaFromInRun("weapon", i);
         return;
       }
