@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-  <title>箭雨 v3.56</title>
+  <title>箭雨 v3.57</title>
   <style>
     html, body {
       margin: 0;
@@ -50,8 +50,8 @@
   </style>
 </head>
 <body>
-  <canvas id="game" width="540" height="960" aria-label="箭雨 v3.56 游戏画布"></canvas>
-  <div id="landscapeBlocker">请旋转设备为竖屏<br>箭雨 v3.56 仅支持竖屏飞行</div>
+  <canvas id="game" width="540" height="960" aria-label="箭雨 v3.57 游戏画布"></canvas>
+  <div id="landscapeBlocker">请旋转设备为竖屏<br>箭雨 v3.57 仅支持竖屏飞行</div>
 <script>
 "use strict";
 
@@ -1236,8 +1236,8 @@ class GearDrop {
       this.y += dy / d * pull * dt;
       if (d < 26) {
         this.active = false;
-        game.equipGear(this.gear);
-        audio.upgrade();
+        // v3.57: 拾取不再自动替换——弹出对比面板让玩家选择（可对比旧装备属性）
+        game.offerGear(this.gear);
       }
     }
   }
@@ -1265,6 +1265,27 @@ class GearDrop {
     g.textAlign = "center";
     g.font = "bold 14px Microsoft YaHei, sans-serif";
     g.fillText(GEAR_SLOT_ICONS[this.gear.slot], 0, 5);
+    // v3.57 属性标签：掉落时直接可见（品质名+属性），不用捡起来才知道
+    g.restore();
+    g.save();
+    g.translate(this.x, this.y - 30 + bob);
+    const stats = this.gear.stats;
+    const lines = stats.length + 1;
+    const tagH = 13 + lines * 12;
+    g.fillStyle = "rgba(8,12,10,0.85)";
+    roundRect(g, -58, -tagH, 116, tagH, 6); g.fill();
+    g.strokeStyle = q.color;
+    g.lineWidth = 1.5;
+    roundRect(g, -58, -tagH, 116, tagH, 6); g.stroke();
+    g.textAlign = "center";
+    g.fillStyle = q.color;
+    g.font = "bold 11px Microsoft YaHei, sans-serif";
+    g.fillText(`${q.name}·${this.gear.name}`, 0, -tagH + 13);
+    g.font = "10px Microsoft YaHei, sans-serif";
+    g.fillStyle = "#d5dde8";
+    stats.forEach((st, i) => {
+      g.fillText(GEAR_STATS[st.t].fmt(st.v), 0, -tagH + 27 + i * 12);
+    });
     g.restore();
   }
 }
@@ -2746,6 +2767,9 @@ class Game {
     this.choices = null;
     this.factionCount = {};
     this.factionAwakened = {};
+    // v3.57 装备选择面板状态（拾取弹对比，玩家决定替换/放弃）
+    this.gearChoice = null;
+    this.gearQueue = [];
     this.awakenMsg = "";
     this.awakenT = 0;
     this.hitStop = 0;
@@ -2991,8 +3015,8 @@ class Game {
       for (const n of this.gearNotify) n.t += dt;
       this.gearNotify = this.gearNotify.filter(n => n.t < n.dur);
     }
-    // 局内商店/数值面板打开时暂停战斗（只更新玩家/粒子）
-    if ((this.inRunShop && this.inRunShop.paused) || this.statsPanel) {
+    // 局内商店/数值面板/装备选择打开时暂停战斗（只更新玩家/粒子）
+    if ((this.inRunShop && this.inRunShop.paused) || this.statsPanel || this.gearChoice) {
       for (const p of this.particles.active()) p.update(dt);
       return;
     }
@@ -3068,6 +3092,9 @@ class Game {
     this.enemies.items.length = 0;
     this.coins.items.length = 0;
     this.gearDrops.items.length = 0;
+    // v3.57: 穿门清理装备选择面板（未处理装备不跨房）
+    this.gearChoice = null;
+    this.gearQueue = [];
     this.player.x = CONFIG.W / 2;
     this.player.y = CONFIG.PLAYER_Y;
     checkThemeSwitch(this);
@@ -3294,6 +3321,35 @@ class Game {
     // 提示玩家吃宝箱（否则 Boss 房不出传送门会以为卡住）
     this.flashMessage("拾取宝箱开启传送门！");
   }
+  // 装备选择：拾取弹对比面板（v3.57）——玩家决定替换/放弃，不再自动替换
+  offerGear(gear) {
+    if (this.gearChoice) {
+      // 面板已开：排队（关闭面板后自动弹下一个）
+      this.gearQueue.push(gear);
+      return;
+    }
+    this.gearChoice = { gear, old: this.player.gear[gear.slot] || null, t: 0 };
+    audio.upgrade();
+  }
+  acceptGear() {
+    if (!this.gearChoice) return;
+    const gear = this.gearChoice.gear;
+    this.gearChoice = null;
+    this.equipGear(gear);
+    this.nextGearChoice();
+  }
+  declineGear() {
+    if (!this.gearChoice) return;
+    this.gearChoice = null;
+    this.flashMessage("已放弃该装备");
+    this.nextGearChoice();
+  }
+  nextGearChoice() {
+    if (this.gearQueue.length) {
+      const g = this.gearQueue.shift();
+      this.gearChoice = { gear: g, old: this.player.gear[g.slot] || null, t: 0 };
+    }
+  }
   // 装备穿戴：同槽位替换（先撤销旧的再加新的），属性实时生效
   equipGear(gear) {
     const p = this.player;
@@ -3480,6 +3536,8 @@ class Game {
     }
     // 装备掉落提示（最上层：三选一/商店遮罩之上，防被盖住，v3.55）
     drawGearNotify(g, this);
+    // 装备对比选择面板（v3.57：拾取后玩家决定替换/放弃）
+    if (this.gearChoice) drawGearChoice(g, this);
     // Boss 出场演出：红色暗幕 + 顶部血光
     if (this.bossIntro > 0) {
       const a = Util.clamp(this.bossIntro / 1.2, 0, 1);
@@ -3561,6 +3619,13 @@ const DemoAI = {
       game.input.hoverY = Util.clamp(y == null ? py : y, 150, CONFIG.H - 70);
     };
 
+    // 0. 装备对比面板：AI 自动决策（新品质 ≥ 旧则替换，否则放弃）
+    if (game.gearChoice) {
+      const gc = game.gearChoice;
+      if (!gc.old || gc.gear.quality > gc.old.quality) game.acceptGear();
+      else game.declineGear();
+      return;
+    }
     // 1. 宝箱优先：主动去吃（x+y 双轴）
     if (game.chest) {
       setTarget(game.chest.x, game.chest.y);
@@ -5126,6 +5191,99 @@ function drawHud(g, state) {
   g.restore();
 }
 
+// 装备对比选择面板（v3.57）：拾取后弹出，玩家对比新旧装备决定替换/放弃
+function drawGearChoice(g, state) {
+  const gc = state.gearChoice;
+  if (!gc) return;
+  const q = GEAR_QUALITY[gc.gear.quality];
+  const hasOld = !!gc.old;
+  g.save();
+  g.fillStyle = "rgba(7,12,8,0.78)";
+  g.fillRect(0, 0, CONFIG.W, CONFIG.H);
+  g.textAlign = "center";
+  g.fillStyle = "#fff0c4";
+  g.font = "bold 30px Microsoft YaHei, sans-serif";
+  g.fillText(hasOld ? "装备对比" : "新装备！", CONFIG.W / 2, 160);
+  g.fillStyle = "#9aa5b4";
+  g.font = "14px Microsoft YaHei, sans-serif";
+  g.fillText(`拾取了 ${q.name}·${GEAR_SLOT_NAMES[gc.gear.slot]}「${gc.gear.name}」`, CONFIG.W / 2, 192);
+  // 左右两张装备卡
+  const cardW = 210, cardH = 300, cardY = 236;
+  const drawCard = (x, gear, isNew) => {
+    const gq = GEAR_QUALITY[gear.quality];
+    g.fillStyle = "rgba(13,18,15,0.92)";
+    roundRect(g, x, cardY, cardW, cardH, 12); g.fill();
+    if (isNew) { g.shadowBlur = 18; g.shadowColor = gq.color; }
+    g.strokeStyle = gq.color;
+    g.lineWidth = isNew ? 3 : 2;
+    roundRect(g, x, cardY, cardW, cardH, 12); g.stroke();
+    g.shadowBlur = 0;
+    // 品质标签
+    g.fillStyle = gq.color;
+    g.font = "bold 15px Microsoft YaHei, sans-serif";
+    g.fillText(isNew ? "新装备" : "当前装备", x + cardW / 2, cardY + 34);
+    // 槽位图标
+    g.fillStyle = gq.color;
+    g.beginPath();
+    g.arc(x + cardW / 2, cardY + 78, 26, 0, TAU);
+    g.fill();
+    g.fillStyle = "#131b14";
+    g.font = "bold 22px Microsoft YaHei, sans-serif";
+    g.fillText(GEAR_SLOT_ICONS[gear.slot], x + cardW / 2, cardY + 85);
+    // 装备名
+    g.fillStyle = "#e8eef6";
+    g.font = "bold 17px Microsoft YaHei, sans-serif";
+    g.fillText(`${gq.name}·${gear.name}`, x + cardW / 2, cardY + 122);
+    // 属性列表（大字清晰）
+    g.font = "15px Microsoft YaHei, sans-serif";
+    gear.stats.forEach((st, i) => {
+      g.fillStyle = "#ffd56a";
+      g.fillText(GEAR_STATS[st.t].fmt(st.v), x + cardW / 2, cardY + 158 + i * 30);
+    });
+  };
+  // 左：当前装备（无则空槽）
+  if (hasOld) {
+    drawCard(40, gc.old, false);
+  } else {
+    g.fillStyle = "rgba(13,18,15,0.92)";
+    roundRect(g, 40, cardY, cardW, cardH, 12); g.fill();
+    g.strokeStyle = "rgba(255,255,255,0.2)";
+    g.lineWidth = 2;
+    roundRect(g, 40, cardY, cardW, cardH, 12); g.stroke();
+    g.fillStyle = "#8a94a3";
+    g.font = "bold 15px Microsoft YaHei, sans-serif";
+    g.fillText("当前装备", 145, cardY + 34);
+    g.font = "bold 26px Microsoft YaHei, sans-serif";
+    g.fillText("空槽位", 145, cardY + 150);
+    g.font = "14px Microsoft YaHei, sans-serif";
+    g.fillText("直接装备新装备", 145, cardY + 190);
+  }
+  // 右：新装备
+  drawCard(290, gc.gear, true);
+  // 按钮：替换/装备 + 放弃
+  const btnY = 580, btnH = 56;
+  g.fillStyle = "rgba(247,201,72,0.25)";
+  roundRect(g, CONFIG.W / 2 - 140, btnY, 130, btnH, 10); g.fill();
+  g.strokeStyle = "#f7c948";
+  g.lineWidth = 2;
+  roundRect(g, CONFIG.W / 2 - 140, btnY, 130, btnH, 10); g.stroke();
+  g.fillStyle = "#ffd56a";
+  g.font = "bold 20px Microsoft YaHei, sans-serif";
+  g.fillText(hasOld ? "替换" : "装备", CONFIG.W / 2 - 75, btnY + 38);
+  g.fillStyle = "rgba(255,255,255,0.12)";
+  roundRect(g, CONFIG.W / 2 + 10, btnY, 130, btnH, 10); g.fill();
+  g.strokeStyle = "rgba(255,255,255,0.35)";
+  g.lineWidth = 2;
+  roundRect(g, CONFIG.W / 2 + 10, btnY, 130, btnH, 10); g.stroke();
+  g.fillStyle = "#c8d2de";
+  g.font = "bold 20px Microsoft YaHei, sans-serif";
+  g.fillText("放弃", CONFIG.W / 2 + 75, btnY + 38);
+  g.fillStyle = "#7a8594";
+  g.font = "13px Microsoft YaHei, sans-serif";
+  g.fillText("拾取多个装备时依次选择", CONFIG.W / 2, btnY + 84);
+  g.restore();
+}
+
 // 装备掉落提示：屏幕右侧边缘弹出品质色小卡片（v3.55）
 function drawGearNotify(g, state) {
   const list = state.gearNotify || [];
@@ -5247,7 +5405,7 @@ function drawMenu(g, state) {
   g.shadowBlur = 6 + 6 * pulse;
   g.fillStyle = "#d4c6af";
   g.font = "20px Microsoft YaHei, sans-serif";
-  g.fillText("v3.56 · 房间闯关 · 排行榜 · 每日挑战", CONFIG.W / 2, 292);
+  g.fillText("v3.57 · 房间闯关 · 排行榜 · 每日挑战", CONFIG.W / 2, 292);
   g.fillStyle = "#ffe59a";
   g.font = "bold 18px Microsoft YaHei, sans-serif";
   g.fillText(Leaderboard.champion || "暂无王者", CONFIG.W / 2, 326);
@@ -5579,6 +5737,13 @@ function canvasPoint(evt) {
 
 function activateAt(x, y) {
   audio.ensure();
+  // 装备对比面板（v3.57 模态，最优先）：替换/装备 + 放弃
+  // 必须在 CHOOSE 判断之前——三选一界面磁吸拾取装备时也能操作，否则面板卡死
+  if (game.gearChoice) {
+    if (x >= CONFIG.W / 2 - 140 && x <= CONFIG.W / 2 - 10 && y >= 580 && y <= 636) { game.acceptGear(); return; }
+    if (x >= CONFIG.W / 2 + 10 && x <= CONFIG.W / 2 + 140 && y >= 580 && y <= 636) { game.declineGear(); return; }
+    return;
+  }
   // ⚠️ 旧版左上角音效按钮分支已删除（与暂停键区域重叠，会抢先拦截暂停触发）
   if (game.state === "CHOOSE" && game.choices) {
     // 三张卡：与 drawChoiceCards 布局一致
